@@ -40,6 +40,7 @@ type CmdArgs struct {
 	TunGw                *string
 	TunMask              *string
 	TunDns               *string
+	TunPersist           *bool
 	ProxyType            *string
 	VConfig              *string
 	SniffingType         *string
@@ -116,6 +117,7 @@ func main() {
 	args.TunGw = flag.String("tunGw", "10.255.0.1", "TUN interface gateway")
 	args.TunMask = flag.String("tunMask", "255.255.255.0", "TUN interface netmask, it should be a prefixlen (a number) for IPv6 address")
 	args.TunDns = flag.String("tunDns", "8.8.8.8,8.8.4.4", "DNS resolvers for TUN interface (only need on Windows)")
+	args.TunPersist = flag.Bool("tunPersist", false, "Persist TUN interface after the program exits or the last open file descriptor is closed (Linux only)")
 	args.ProxyType = flag.String("proxyType", "socks", "Proxy handler type")
 	args.DelayICMP = flag.Int("delayICMP", 10, "Delay ICMP packets for a short period of time, in milliseconds")
 	args.LogLevel = flag.String("loglevel", "info", "Logging level. (debug, info, warn, error, none)")
@@ -152,7 +154,7 @@ func main() {
 
 	// Open the tun device.
 	dnsServers := strings.Split(*args.TunDns, ",")
-	tunDev, err := tun.OpenTunDevice(*args.TunName, *args.TunAddr, *args.TunGw, *args.TunMask, dnsServers)
+	tunDev, err := tun.OpenTunDevice(*args.TunName, *args.TunAddr, *args.TunGw, *args.TunMask, dnsServers, *args.TunPersist)
 	if err != nil {
 		log.Fatalf("failed to open tun device: %v", err)
 	}
