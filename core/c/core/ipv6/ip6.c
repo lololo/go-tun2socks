@@ -716,6 +716,10 @@ netif_found:
   /* Init header length. */
   hlen = hlen_tot = IP6_HLEN;
 
+  LWIP_DEBUGF(IP6_DEBUG, ("ip6_input: \n"));
+  ip6_debug_print(p);
+  LWIP_DEBUGF(IP6_DEBUG, ("ip6_input: p->len %"U16_F" p->tot_len %"U16_F"\n", p->len, p->tot_len));
+
   /* Move to payload. */
   pbuf_remove_header(p, IP6_HLEN);
 
@@ -1055,12 +1059,8 @@ netif_found:
 options_done:
 
   /* send to upper layers */
-  LWIP_DEBUGF(IP6_DEBUG, ("ip6_input: \n"));
-  ip6_debug_print(p);
-  LWIP_DEBUGF(IP6_DEBUG, ("ip6_input: p->len %"U16_F" p->tot_len %"U16_F"\n", p->len, p->tot_len));
-
   ip_data.current_ip_header_tot_len = hlen_tot;
-  
+
 #if LWIP_RAW
   /* p points to IPv6 header again for raw_input. */
   pbuf_add_header_force(p, hlen_tot);

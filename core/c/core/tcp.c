@@ -5,13 +5,13 @@
  *
  * @defgroup tcp_raw TCP
  * @ingroup callbackstyle_api
- * Transmission Control Protocol for IP\n
+ * Transmission Control Protocol for IP<br>
  * @see @ref api
  *
  * Common functions for the TCP implementation, such as functions
  * for manipulating the data structures and the TCP timer functions. TCP functions
- * related to input and output is found in tcp_in.c and tcp_out.c respectively.\n
- * 
+ * related to input and output is found in tcp_in.c and tcp_out.c respectively.<br>
+ *
  * TCP connection setup
  * --------------------
  * The functions used for setting up connections is similar to that of
@@ -24,7 +24,7 @@
  * - tcp_listen() and tcp_listen_with_backlog()
  * - tcp_accept()
  * - tcp_connect()
- * 
+ *
  * Sending TCP data
  * ----------------
  * TCP data is sent by enqueueing the data with a call to tcp_write() and
@@ -34,7 +34,7 @@
  * - tcp_write()
  * - tcp_output()
  * - tcp_sent()
- * 
+ *
  * Receiving TCP data
  * ------------------
  * TCP data reception is callback based - an application specified
@@ -44,7 +44,7 @@
  * window.
  * - tcp_recv()
  * - tcp_recved()
- * 
+ *
  * Application polling
  * -------------------
  * When a connection is idle (i.e., no data is either transmitted or
@@ -62,7 +62,7 @@
  * - tcp_close()
  * - tcp_abort()
  * - tcp_err()
- * 
+ *
  */
 
 /*
@@ -469,7 +469,7 @@ tcp_close_shutdown_fin(struct tcp_pcb *pcb)
  * a closing state), the connection is closed, and put in a closing state.
  * The pcb is then automatically freed in tcp_slowtmr(). It is therefore
  * unsafe to reference it (unless an error is returned).
- * 
+ *
  * The function may return ERR_MEM if no memory
  * was available for closing the connection. If so, the application
  * should wait and try again either by using the acknowledgment
@@ -647,6 +647,7 @@ tcp_abort(struct tcp_pcb *pcb)
  * bound to all local IP addresses.
  * If another connection is bound to the same port, the function will
  * return ERR_USE, otherwise ERR_OK is returned.
+ * @see MEMP_NUM_TCP_PCB_LISTEN and MEMP_NUM_TCP_PCB
  *
  * @param pcb the tcp_pcb to bind (no check is done whether this pcb is
  *        already bound!)
@@ -797,7 +798,7 @@ tcp_accept_null(void *arg, struct tcp_pcb *pcb, err_t err)
  * When an incoming connection is accepted, the function specified with
  * the tcp_accept() function will be called. The pcb has to be bound
  * to a local port with the tcp_bind() function.
- * 
+ *
  * The tcp_listen() function returns a new connection identifier, and
  * the one passed as an argument to the function will be
  * deallocated. The reason for this behavior is that less memory is
@@ -812,7 +813,7 @@ tcp_accept_null(void *arg, struct tcp_pcb *pcb, err_t err)
  * The backlog limits the number of outstanding connections
  * in the listen queue to the value specified by the backlog argument.
  * To use it, your need to set TCP_LISTEN_BACKLOG=1 in your lwipopts.h.
- * 
+ *
  * @param pcb the original tcp_pcb
  * @param backlog the incoming connections queue limit
  * @return tcp_pcb used for listening, consumes less memory.
@@ -892,6 +893,9 @@ tcp_listen_with_backlog_and_err(struct tcp_pcb *pcb, u8_t backlog, err_t *err)
   lpcb->netif_idx = NETIF_NO_INDEX;
   lpcb->ttl = pcb->ttl;
   lpcb->tos = pcb->tos;
+#if LWIP_VLAN_PCP
+  lpcb->netif_hints.tci = pcb->netif_hints.tci;
+#endif /* LWIP_VLAN_PCP */
 #if LWIP_IPV4 && LWIP_IPV6
   IP_SET_TYPE_VAL(lpcb->remote_ip, pcb->local_ip.type);
 #endif /* LWIP_IPV4 && LWIP_IPV6 */
@@ -1039,7 +1043,7 @@ again:
  * Connects to another host. The function given as the "connected"
  * argument will be called when the connection has been established.
  *  Sets up the pcb to connect to the remote host and sends the
- * initial SYN segment which opens the connection. 
+ * initial SYN segment which opens the connection.
  *
  * The tcp_connect() function returns immediately; it does not wait for
  * the connection to be properly setup. Instead, it will call the
@@ -1711,14 +1715,14 @@ tcp_kill_prio(u8_t prio)
 
   mprio = LWIP_MIN(TCP_PRIO_MAX, prio);
 
-  /* We want to kill connections with a lower prio, so bail out if 
+  /* We want to kill connections with a lower prio, so bail out if
    * supplied prio is 0 - there can never be a lower prio
    */
   if (mprio == 0) {
     return;
   }
 
-  /* We only want kill connections with a lower prio, so decrement prio by one 
+  /* We only want kill connections with a lower prio, so decrement prio by one
    * and start searching for oldest connection with same or lower priority than mprio.
    * We want to find the connections with the lowest possible prio, and among
    * these the one with the longest inactivity time.
@@ -1933,6 +1937,7 @@ tcp_alloc(u8_t prio)
  * any of the TCP PCB lists.
  * The pcb is not put on any list until binding using tcp_bind().
  * If memory is not available for creating the new pcb, NULL is returned.
+ * @see MEMP_NUM_TCP_PCB_LISTEN and MEMP_NUM_TCP_PCB
  *
  * @internal: Maybe there should be a idle TCP PCB list where these
  * PCBs are put on. Port reservation using tcp_bind() is implemented but
@@ -1952,6 +1957,7 @@ tcp_new(void)
  * Creates a new TCP protocol control block but doesn't
  * place it on any of the TCP PCB lists.
  * The pcb is not put on any list until binding using tcp_bind().
+ * @see MEMP_NUM_TCP_PCB_LISTEN and MEMP_NUM_TCP_PCB
  *
  * @param type IP address type, see @ref lwip_ip_addr_type definitions.
  * If you want to listen to IPv4 and IPv6 (dual-stack) connections,
@@ -2041,7 +2047,7 @@ tcp_sent(struct tcp_pcb *pcb, tcp_sent_fn sent)
  * @ingroup tcp_raw
  * Used to specify the function that should be called when a fatal error
  * has occurred on the connection.
- * 
+ *
  * If a connection is aborted because of an error, the application is
  * alerted of this event by the err callback. Errors that might abort a
  * connection are when there is a shortage of memory. The callback
@@ -2067,6 +2073,7 @@ tcp_err(struct tcp_pcb *pcb, tcp_err_fn err)
  * @ingroup tcp_raw
  * Used for specifying the function that should be called when a
  * LISTENing connection has been connected to another host.
+ * @see MEMP_NUM_TCP_PCB_LISTEN and MEMP_NUM_TCP_PCB
  *
  * @param pcb tcp_pcb to set the accept callback
  * @param accept callback function to call for this pcb when LISTENing
@@ -2091,7 +2098,7 @@ tcp_accept(struct tcp_pcb *pcb, tcp_accept_fn accept)
  * number of TCP coarse grained timer shots, which typically occurs
  * twice a second. An interval of 10 means that the application would
  * be polled every 5 seconds.
- * 
+ *
  * When a connection is idle (i.e., no data is either transmitted or
  * received), lwIP will repeatedly poll the application by calling a
  * specified callback function. This can be used either as a watchdog
@@ -2533,7 +2540,7 @@ tcp_pcbs_sane(void)
 /**
  * @defgroup tcp_raw_extargs ext arguments
  * @ingroup tcp_raw
- * Additional data storage per tcp pcb\n
+ * Additional data storage per tcp pcb<br>
  * @see @ref tcp_raw
  *
  * When LWIP_TCP_PCB_NUM_EXT_ARGS is > 0, every tcp pcb (including listen pcb)
@@ -2591,7 +2598,7 @@ tcp_ext_arg_alloc_id(void)
  * @param callbacks callback table (const since it is referenced, not copied!)
  */
 void
-tcp_ext_arg_set_callbacks(struct tcp_pcb *pcb, uint8_t id, const struct tcp_ext_arg_callbacks * const callbacks)
+tcp_ext_arg_set_callbacks(struct tcp_pcb *pcb, u8_t id, const struct tcp_ext_arg_callbacks * const callbacks)
 {
   LWIP_ASSERT("pcb != NULL", pcb != NULL);
   LWIP_ASSERT("id < LWIP_TCP_PCB_NUM_EXT_ARGS", id < LWIP_TCP_PCB_NUM_EXT_ARGS);
@@ -2610,7 +2617,7 @@ tcp_ext_arg_set_callbacks(struct tcp_pcb *pcb, uint8_t id, const struct tcp_ext_
  * @param id ext_args index to set (allocated via @ref tcp_ext_arg_alloc_id)
  * @param arg data pointer to set
  */
-void tcp_ext_arg_set(struct tcp_pcb *pcb, uint8_t id, void *arg)
+void tcp_ext_arg_set(struct tcp_pcb *pcb, u8_t id, void *arg)
 {
   LWIP_ASSERT("pcb != NULL", pcb != NULL);
   LWIP_ASSERT("id < LWIP_TCP_PCB_NUM_EXT_ARGS", id < LWIP_TCP_PCB_NUM_EXT_ARGS);
@@ -2628,7 +2635,7 @@ void tcp_ext_arg_set(struct tcp_pcb *pcb, uint8_t id, void *arg)
  * @param id ext_args index to set (allocated via @ref tcp_ext_arg_alloc_id)
  * @return data pointer at the given index
  */
-void *tcp_ext_arg_get(const struct tcp_pcb *pcb, uint8_t id)
+void *tcp_ext_arg_get(const struct tcp_pcb *pcb, u8_t id)
 {
   LWIP_ASSERT("pcb != NULL", pcb != NULL);
   LWIP_ASSERT("id < LWIP_TCP_PCB_NUM_EXT_ARGS", id < LWIP_TCP_PCB_NUM_EXT_ARGS);
