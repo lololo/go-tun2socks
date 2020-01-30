@@ -8,6 +8,7 @@ package core
 */
 import "C"
 import (
+	"log"
 	"sync"
 	"time"
 	"unsafe"
@@ -26,8 +27,9 @@ type LWIPStack interface {
 var lwipMutex = &sync.Mutex{}
 
 type lwipStack struct {
-	tpcb *C.struct_tcp_pcb
-	upcb *C.struct_udp_pcb
+	tpcb            *C.struct_tcp_pcb
+	upcb            *C.struct_udp_pcb
+	timeoutStopChan chan bool
 }
 
 // NewLWIPStack listens for any incoming connections/packets and registers
@@ -69,21 +71,26 @@ func NewLWIPStack() LWIPStack {
 	}
 
 	setUDPRecvCallback(udpPCB, nil)
-
-	go func() {
+	c := make(chan bool)
+	go func(c <-chan bool) {
+	Loop:
 		for {
 			select {
+			case <-c:
+				log.Printf("got sys_check_timeouts stop signal")
+				break Loop
 			case <-time.After(CHECK_TIMEOUTS_INTERVAL * time.Millisecond):
 				lwipMutex.Lock()
 				C.sys_check_timeouts()
 				lwipMutex.Unlock()
 			}
 		}
-	}()
+	}(c)
 
 	return &lwipStack{
-		tpcb: tcpPCB,
-		upcb: udpPCB,
+		tpcb:            tcpPCB,
+		upcb:            udpPCB,
+		timeoutStopChan: c,
 	}
 }
 
@@ -104,6 +111,7 @@ func (s *lwipStack) Close() error {
 		c.(*udpConn).Close()
 		return true
 	})
+	s.timeoutStopChan <- true
 	return nil
 }
 
