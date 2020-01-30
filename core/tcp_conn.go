@@ -3,6 +3,12 @@ package core
 /*
 #cgo CFLAGS: -I./c/include
 #include "lwip/tcp.h"
+
+void
+tcp_nagle_disable_cgo(struct tcp_pcb *pcb)
+{
+	tcp_nagle_disable(pcb);
+}
 */
 import "C"
 import (
@@ -79,6 +85,9 @@ func newTCPConn(pcb *C.struct_tcp_pcb, handler TCPConnHandler) (TCPConn, error) 
 
 	// Pass the key as arg for subsequent tcp callbacks.
 	C.tcp_arg(pcb, unsafe.Pointer(connKeyArg))
+
+	// From badvpn-tun2socks
+	C.tcp_nagle_disable_cgo(pcb)
 
 	// Register callbacks.
 	setTCPRecvCallback(pcb)
