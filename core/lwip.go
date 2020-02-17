@@ -73,12 +73,15 @@ func NewLWIPStack() LWIPStack {
 	setUDPRecvCallback(udpPCB, nil)
 	c := make(chan bool)
 	go func(c <-chan bool) {
+		var ok bool
 	Loop:
 		for {
 			select {
-			case <-c:
-				log.Printf("got sys_check_timeouts stop signal")
-				break Loop
+			case _, ok = <-c:
+				if !ok {
+					log.Printf("got sys_check_timeouts stop signal")
+					break Loop
+				}
 			case <-time.After(CHECK_TIMEOUTS_INTERVAL * time.Millisecond):
 				lwipMutex.Lock()
 				C.sys_check_timeouts()
@@ -111,7 +114,7 @@ func (s *lwipStack) Close() error {
 		c.(*udpConn).Close()
 		return true
 	})
-	s.timeoutStopChan <- true
+	close(s.timeoutStopChan)
 	return nil
 }
 
