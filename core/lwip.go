@@ -35,7 +35,7 @@ type lwipStack struct {
 // NewLWIPStack listens for any incoming connections/packets and registers
 // corresponding accept/recv callback functions.
 func NewLWIPStack() LWIPStack {
-	tcpPCB := C.tcp_new()
+	tcpPCB := C.tcp_new_ip_type(C.IPADDR_TYPE_V4)
 	if tcpPCB == nil {
 		panic("tcp_new return nil")
 	}
