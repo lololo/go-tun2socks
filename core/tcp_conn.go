@@ -432,6 +432,18 @@ func (conn *tcpConn) closeInternal() error {
 
 	// FIXME Handle error.
 	err := C.tcp_close(conn.pcb)
+	switch err {
+	case C.ERR_OK:
+		// ERR_OK if connection has been closed
+		break
+	case C.ERR_ARG:
+		// invalid pointer or state
+		panic("closeInternal: tcp pcb is invalid")
+	default:
+		// another err_t if closing failed and pcb is not freed
+		// make sure tcp_free is invoked
+		C.tcp_abort(conn.pcb)
+	}
 	if err == C.ERR_OK {
 		return nil
 	} else {

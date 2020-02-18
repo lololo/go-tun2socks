@@ -114,7 +114,29 @@ func (s *lwipStack) Close() error {
 		c.(*udpConn).Close()
 		return true
 	})
+
+	// free TCP listener pcb
+	err := C.tcp_close(s.tpcb)
+	switch err {
+	case C.ERR_OK:
+		// ERR_OK if connection has been closed
+		break
+	case C.ERR_ARG:
+		// invalid pointer or state
+		panic("listen tpcb is invalid")
+	default:
+		// another err_t if closing failed and pcb is not freed
+		// make sure free is invoked
+		C.tcp_abort(s.tpcb)
+	}
+
+	// free UDP pcb
+	C.udp_remove(s.upcb)
+
+	// stop timeout check goroutine
+	// must be the last step
 	close(s.timeoutStopChan)
+
 	return nil
 }
 
