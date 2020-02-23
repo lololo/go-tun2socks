@@ -83,59 +83,44 @@ type duplexConn interface {
 	CloseWrite() error
 }
 
-func (h *tcpHandler) relay(lhs, rhs net.Conn, sess *stats.Session) {
-	upCh := make(chan struct{})
-
-	cls := func(dir direction, interrupt bool) {
-		lhsDConn, lhsOk := lhs.(duplexConn)
-		rhsDConn, rhsOk := rhs.(duplexConn)
-		if !interrupt && lhsOk && rhsOk {
-			switch dir {
-			case dirUplink:
-				lhsDConn.CloseRead()
-				rhsDConn.CloseWrite()
-			case dirDownlink:
-				lhsDConn.CloseWrite()
-				rhsDConn.CloseRead()
-			default:
-				panic("unexpected direction")
-			}
-		} else {
-			lhs.Close()
-			rhs.Close()
-		}
+func relayClose(src, dst net.Conn, closeErr error) {
+	// interrupt the conn if the error is not nil (not EOF)
+	// half close uplink direction of the TCP conn if possible
+	if closeErr != nil {
+		src.Close()
+		dst.Close()
+		return
 	}
 
-	// Uplink
-	go func() {
+	srcDConn, srcOk := src.(duplexConn)
+	dstDConn, dstOk := dst.(duplexConn)
+	if srcOk && dstOk {
+		srcDConn.CloseRead()
+		dstDConn.CloseWrite()
+	}
+}
+
+func relayGenerator(h *tcpHandler, src, dst net.Conn, dir direction, sess *stats.Session) chan bool {
+	stopSig := make(chan bool)
+	go func(src, dst net.Conn, dir direction, sess *stats.Session, stopChan chan bool) {
 		var err error
 		if h.sessionStater != nil && sess != nil {
-			_, err = statsCopy(rhs, lhs, sess, dirUplink)
+			_, err = statsCopy(dst, src, sess, dir)
 		} else {
-			_, err = io.Copy(rhs, lhs)
+			_, err = io.Copy(dst, src)
 		}
-		if err != nil {
-			cls(dirUplink, true) // interrupt the conn if the error is not nil (not EOF)
-		} else {
-			cls(dirUplink, false) // half close uplink direction of the TCP conn if possible
-		}
-		upCh <- struct{}{}
-	}()
+		relayClose(src, dst, err)
+		close(stopChan) // send uplink finished signal
+	}(src, dst, dir, sess, stopSig)
+	return stopSig
+}
 
-	// Downlink
-	var err error
-	if h.sessionStater != nil && sess != nil {
-		_, err = statsCopy(lhs, rhs, sess, dirDownlink)
-	} else {
-		_, err = io.Copy(lhs, rhs)
-	}
-	if err != nil {
-		cls(dirDownlink, true)
-	} else {
-		cls(dirDownlink, false)
-	}
+func (h *tcpHandler) relay(lhs, rhs net.Conn, sess *stats.Session) {
+	uplinkSig := relayGenerator(h, lhs, rhs, dirUplink, sess)
+	downlinkSig := relayGenerator(h, rhs, lhs, dirDownlink, sess)
 
-	<-upCh // Wait for uplink done.
+	<-uplinkSig
+	<-downlinkSig
 
 	if h.sessionStater != nil {
 		h.sessionStater.RemoveSession(lhs)
