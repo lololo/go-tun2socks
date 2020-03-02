@@ -53,6 +53,7 @@ func (h *udpHandler) handleTCP(conn core.UDPConn, c net.Conn) {
 	defer core.FreeBytes(buf)
 
 	for {
+		// Don't timeout
 		c.SetDeadline(time.Time{})
 		_, err := c.Read(buf)
 		if err == io.EOF {
@@ -60,6 +61,7 @@ func (h *udpHandler) handleTCP(conn core.UDPConn, c net.Conn) {
 			h.Close(conn)
 			return
 		} else if err != nil {
+			log.Warnf("UDP associate to %v closed unexpectedly by remote, err: %v", c.RemoteAddr(), err)
 			h.Close(conn)
 			return
 		}
@@ -78,7 +80,7 @@ func (h *udpHandler) fetchUDPInput(conn core.UDPConn, input net.PacketConn) {
 		input.SetDeadline(time.Now().Add(h.timeout))
 		n, _, err := input.ReadFrom(buf)
 		if err != nil {
-			// log.Printf("read remote failed: %v", err)
+			log.Warnf("read remote failed: %v", err)
 			return
 		}
 
@@ -87,6 +89,7 @@ func (h *udpHandler) fetchUDPInput(conn core.UDPConn, input net.PacketConn) {
 		if err != nil {
 			return
 		}
+		log.Infof("udp resolvedAddr: %v", resolvedAddr)
 		n, err = conn.WriteFrom(buf[int(3+len(addr)):n], resolvedAddr)
 		if n > 0 && h.sessionStater != nil {
 			if sess := h.sessionStater.GetSession(conn); sess != nil {
@@ -132,6 +135,7 @@ func (h *udpHandler) Connect(conn core.UDPConn, target *net.UDPAddr) error {
 }
 
 func (h *udpHandler) connectInternal(conn core.UDPConn, dest string) error {
+	log.Infof("connectInternal: dest is %v", dest)
 	c, err := net.DialTimeout("tcp", core.ParseTCPAddr(h.proxyHost, h.proxyPort).String(), 4*time.Second)
 	if err != nil {
 		return err
