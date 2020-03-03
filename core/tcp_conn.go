@@ -106,7 +106,8 @@ func newTCPConn(pcb *C.struct_tcp_pcb, handler TCPConnHandler) (TCPConn, error) 
 	setTCPErrCallback(pcb)
 	setTCPPollCallback(pcb, C.u8_t(TCP_POLL_INTERVAL))
 
-	buf := buffer.New(0xffff)
+	// Create 32 KB sized-chunks of memory as needed to expand/contract the buffer size.
+	buf := buffer.NewPartition(buffer.NewMemPool(32*1024))
 	pipeReader, pipeWriter := nio.Pipe(buf)
 	conn := &tcpConn{
 		pcb:           pcb,
