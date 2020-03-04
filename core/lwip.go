@@ -10,6 +10,7 @@ import "C"
 import (
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 )
@@ -27,9 +28,10 @@ type LWIPStack interface {
 var lwipMutex = &sync.Mutex{}
 
 type lwipStack struct {
-	tpcb            *C.struct_tcp_pcb
-	upcb            *C.struct_udp_pcb
-	timeoutStopChan chan bool
+	tpcb       *C.struct_tcp_pcb
+	upcb       *C.struct_udp_pcb
+	isShutdown *int64          //sys_check_timeouts shutdown flag
+	shutdownWg *sync.WaitGroup //sys_check_timeouts Semaphore
 }
 
 // NewLWIPStack listens for any incoming connections/packets and registers
@@ -71,30 +73,36 @@ func NewLWIPStack() LWIPStack {
 	}
 
 	setUDPRecvCallback(udpPCB, nil)
-	c := make(chan bool)
-	go func(c <-chan bool) {
-		var ok bool
-	Loop:
-		for {
-			select {
-			case _, ok = <-c:
-				if !ok {
-					log.Printf("got sys_check_timeouts stop signal")
-					break Loop
-				}
-			case <-time.After(CHECK_TIMEOUTS_INTERVAL * time.Millisecond):
-				lwipMutex.Lock()
-				C.sys_check_timeouts()
-				lwipMutex.Unlock()
-			}
-		}
-	}(c)
+	var stopFlag int64
+	atomic.StoreInt64(&stopFlag, 0)
+
+	// reinit on each startup
+	waitGroup := &sync.WaitGroup{}
+	go lwipSysCheckTimeoutsWorker(waitGroup, &stopFlag, CHECK_TIMEOUTS_INTERVAL*time.Millisecond)
 
 	return &lwipStack{
-		tpcb:            tcpPCB,
-		upcb:            udpPCB,
-		timeoutStopChan: c,
+		tpcb:       tcpPCB,
+		upcb:       udpPCB,
+		isShutdown: &stopFlag,
+		shutdownWg: waitGroup,
 	}
+}
+
+func lwipSysCheckTimeoutsWorker(wg *sync.WaitGroup, isShutdown *int64, d time.Duration) {
+	defer wg.Done()
+
+	for {
+		if atomic.LoadInt64(isShutdown) == 1 {
+			break
+		}
+
+		lwipMutex.Lock()
+		C.sys_check_timeouts()
+		lwipMutex.Unlock()
+
+		time.Sleep(d)
+	}
+	log.Printf("got sys_check_timeouts stop signal")
 }
 
 func (s *lwipStack) Write(data []byte) (int, error) {
@@ -133,9 +141,10 @@ func (s *lwipStack) Close() error {
 	// free UDP pcb
 	C.udp_remove(s.upcb)
 
-	// stop timeout check goroutine
-	// must be the last step
-	close(s.timeoutStopChan)
+	//wait for sys_check_timeouts goroutine
+	s.shutdownWg.Add(1)
+	atomic.StoreInt64(s.isShutdown, 1)
+	s.shutdownWg.Wait()
 
 	return nil
 }
