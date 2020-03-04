@@ -67,8 +67,7 @@
 #define MEMP_NUM_TCP_SEG 128
 
 #define TCP_MSS 1460
-#define TCP_SND_BUF 16384
-#define TCP_SND_QUEUELEN (4 * (TCP_SND_BUF)/(TCP_MSS))
+#define TCP_SND_BUF (65535)
 
 #define LWIP_TCP_SACK_OUT 1
 #define LWIP_TCP_KEEPALIVE 1
