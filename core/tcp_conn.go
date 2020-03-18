@@ -4,6 +4,12 @@ package core
 #cgo CFLAGS: -I./c/custom -I./c/include
 #include "lwip/tcp.h"
 
+u32_t
+tcp_sndbuf_cgo(struct tcp_pcb *pcb)
+{
+	return tcp_sndbuf(pcb);
+}
+
 void
 tcp_nagle_disable_cgo(struct tcp_pcb *pcb)
 {
@@ -78,7 +84,6 @@ type tcpConn struct {
 	remoteAddr    *net.TCPAddr
 	localAddr     *net.TCPAddr
 	connKey       unsafe.Pointer
-	canWrite      *sync.Cond // Condition variable to implement TCP backpressure.
 	state         tcpConnState
 	sndPipeReader *nio.PipeReader
 	sndPipeWriter *nio.PipeWriter
@@ -105,7 +110,6 @@ func newTCPConn(pcb *C.struct_tcp_pcb, handler TCPConnHandler) (TCPConn, error) 
 		localAddr:     ParseTCPAddr(ipAddrNTOA(pcb.remote_ip), uint16(pcb.remote_port)),
 		remoteAddr:    ParseTCPAddr(ipAddrNTOA(pcb.local_ip), uint16(pcb.local_port)),
 		connKey:       nil,
-		canWrite:      sync.NewCond(&sync.Mutex{}),
 		state:         tcpNewConn,
 		sndPipeReader: pipeReader,
 		sndPipeWriter: pipeWriter,
@@ -113,7 +117,7 @@ func newTCPConn(pcb *C.struct_tcp_pcb, handler TCPConnHandler) (TCPConn, error) 
 
 	// Associate conn with key and save to the global map.
 	identifierPtr := GoPointerSave(conn)
-	conn.connKey = identifierPtr
+	conn.SetConnKey(identifierPtr)
 	// Pass the pointer identifier subsequent tcp callbacks.
 	C.tcp_arg(pcb, identifierPtr)
 
@@ -157,6 +161,11 @@ func (conn *tcpConn) SetReadDeadline(t time.Time) error {
 	return nil
 }
 func (conn *tcpConn) SetWriteDeadline(t time.Time) error {
+	return nil
+}
+
+func (conn *tcpConn) SetConnKey(p unsafe.Pointer) error {
+	conn.connKey = p
 	return nil
 }
 
@@ -233,12 +242,22 @@ func (conn *tcpConn) Read(data []byte) (int, error) {
 func (conn *tcpConn) writeInternal(data []byte) (int, error) {
 	err := C.tcp_write(conn.pcb, unsafe.Pointer(&data[0]), C.u16_t(len(data)), C.TCP_WRITE_FLAG_COPY)
 	if err == C.ERR_OK {
-		C.tcp_output(conn.pcb)
 		return len(data), nil
 	} else if err == C.ERR_MEM {
 		return 0, nil
 	}
 	return 0, fmt.Errorf("tcp_write failed (%v)", int(err))
+}
+
+func (conn *tcpConn) tcpOutputInternal() error {
+	lwipMutex.Lock()
+	defer lwipMutex.Unlock()
+	err := C.tcp_output(conn.pcb)
+	if err != C.ERR_OK {
+		return fmt.Errorf("tcp_output failed (%v)", int(err))
+	}
+	return nil
+
 }
 
 func (conn *tcpConn) writeCheck() error {
@@ -271,9 +290,6 @@ func (conn *tcpConn) writeCheck() error {
 func (conn *tcpConn) Write(data []byte) (int, error) {
 	totalWritten := 0
 
-	conn.canWrite.L.Lock()
-	defer conn.canWrite.L.Unlock()
-
 	for len(data) > 0 {
 		if err := conn.writeCheck(); err != nil {
 			return totalWritten, err
@@ -281,26 +297,27 @@ func (conn *tcpConn) Write(data []byte) (int, error) {
 
 		lwipMutex.Lock()
 		toWrite := len(data)
-		if toWrite > int(conn.pcb.snd_buf) {
+		sendBufLen := C.tcp_sndbuf_cgo(conn.pcb)
+		if toWrite > int(sendBufLen) {
 			// Write at most the size of the LWIP buffer.
-			toWrite = int(conn.pcb.snd_buf)
+			toWrite = int(sendBufLen)
 		}
 		if toWrite > 0 {
 			written, err := conn.writeInternal(data[0:toWrite])
-			totalWritten += written
 			if err != nil {
 				lwipMutex.Unlock()
 				return totalWritten, err
 			}
+			totalWritten += written
 			data = data[written:len(data)]
 		}
 		lwipMutex.Unlock()
-		if len(data) == 0 {
-			break // Don't block if all the data has been written.
-		}
-		conn.canWrite.Wait()
 	}
 
+	err := conn.tcpOutputInternal()
+	if err != nil {
+		return totalWritten, err
+	}
 	return totalWritten, nil
 }
 
@@ -378,9 +395,6 @@ func (conn *tcpConn) checkState() error {
 		return err
 	}
 
-	// Signal the writer to try writting.
-	conn.canWrite.Broadcast()
-
 	return NewLWIPError(LWIP_ERR_OK)
 }
 
@@ -416,7 +430,6 @@ func (conn *tcpConn) setLocalClosed() error {
 	} else {
 		conn.state = tcpReceiveClosed
 	}
-	conn.canWrite.Broadcast()
 	return nil
 }
 
@@ -463,7 +476,6 @@ func (conn *tcpConn) Abort() {
 	defer conn.Unlock()
 
 	conn.state = tcpAborting
-	conn.canWrite.Broadcast()
 }
 
 func (conn *tcpConn) Err(err error) {
@@ -472,7 +484,6 @@ func (conn *tcpConn) Err(err error) {
 
 	conn.release()
 	conn.state = tcpErrored
-	conn.canWrite.Broadcast()
 }
 
 func (conn *tcpConn) LocalClosed() error {
