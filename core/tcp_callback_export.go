@@ -8,8 +8,8 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	"unsafe"
 	"github.com/eycorsican/go-tun2socks/component/pool"
+	"unsafe"
 )
 
 // These exported callback functions must be placed in a seperated file.
@@ -57,7 +57,7 @@ func tcpRecvFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, p *C.struct_pbuf, err
 		}
 	}()
 
-	conn, ok := tcpConns.Load(getConnKeyVal(arg))
+	conn, ok := GoPointerRestore(arg)
 	if !ok {
 		// The connection does not exists.
 		C.tcp_abort(tpcb)
@@ -115,7 +115,7 @@ func tcpRecvFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, p *C.struct_pbuf, err
 
 //export tcpSentFn
 func tcpSentFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, len C.u16_t) C.err_t {
-	if conn, ok := tcpConns.Load(getConnKeyVal(arg)); ok {
+	if conn, ok := GoPointerRestore(arg); ok {
 		err := conn.(TCPConn).Sent(uint16(len))
 		switch err.(*lwipError).Code {
 		case LWIP_ERR_ABRT:
@@ -133,7 +133,7 @@ func tcpSentFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, len C.u16_t) C.err_t 
 
 //export tcpErrFn
 func tcpErrFn(arg unsafe.Pointer, err C.err_t) {
-	if conn, ok := tcpConns.Load(getConnKeyVal(arg)); ok {
+	if conn, ok := GoPointerRestore(arg); ok {
 		switch err {
 		case C.ERR_ABRT:
 			// Aborted through tcp_abort or by a TCP timer
@@ -149,7 +149,7 @@ func tcpErrFn(arg unsafe.Pointer, err C.err_t) {
 
 //export tcpPollFn
 func tcpPollFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb) C.err_t {
-	if conn, ok := tcpConns.Load(getConnKeyVal(arg)); ok {
+	if conn, ok := GoPointerRestore(arg); ok {
 		err := conn.(TCPConn).Poll()
 		switch err.(*lwipError).Code {
 		case LWIP_ERR_ABRT:

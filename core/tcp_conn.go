@@ -25,7 +25,6 @@ import (
 	"github.com/djherbis/buffer"
 	"github.com/djherbis/nio"
 	"io"
-	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -78,8 +77,7 @@ type tcpConn struct {
 	handler       TCPConnHandler
 	remoteAddr    *net.TCPAddr
 	localAddr     *net.TCPAddr
-	connKeyArg    unsafe.Pointer
-	connKey       uint32
+	connKey       unsafe.Pointer
 	canWrite      *sync.Cond // Condition variable to implement TCP backpressure.
 	state         tcpConnState
 	sndPipeReader *nio.PipeReader
@@ -89,13 +87,6 @@ type tcpConn struct {
 }
 
 func newTCPConn(pcb *C.struct_tcp_pcb, handler TCPConnHandler) (TCPConn, error) {
-	connKeyArg := newConnKeyArg()
-	connKey := rand.Uint32()
-	setConnKeyVal(unsafe.Pointer(connKeyArg), connKey)
-
-	// Pass the key as arg for subsequent tcp callbacks.
-	C.tcp_arg(pcb, unsafe.Pointer(connKeyArg))
-
 	// From badvpn-tun2socks
 	C.tcp_nagle_disable_cgo(pcb)
 	C.tcp_keepalive_settings_cgo(pcb)
@@ -113,8 +104,7 @@ func newTCPConn(pcb *C.struct_tcp_pcb, handler TCPConnHandler) (TCPConn, error) 
 		handler:       handler,
 		localAddr:     ParseTCPAddr(ipAddrNTOA(pcb.remote_ip), uint16(pcb.remote_port)),
 		remoteAddr:    ParseTCPAddr(ipAddrNTOA(pcb.local_ip), uint16(pcb.local_port)),
-		connKeyArg:    connKeyArg,
-		connKey:       connKey,
+		connKey:       nil,
 		canWrite:      sync.NewCond(&sync.Mutex{}),
 		state:         tcpNewConn,
 		sndPipeReader: pipeReader,
@@ -122,7 +112,10 @@ func newTCPConn(pcb *C.struct_tcp_pcb, handler TCPConnHandler) (TCPConn, error) 
 	}
 
 	// Associate conn with key and save to the global map.
-	tcpConns.Store(connKey, conn)
+	identifierPtr := GoPointerSave(conn)
+	conn.connKey = identifierPtr
+	// Pass the pointer identifier subsequent tcp callbacks.
+	C.tcp_arg(pcb, identifierPtr)
 
 	// Connecting remote host could take some time, do it in another goroutine
 	// to prevent blocking the lwip thread.
@@ -488,10 +481,8 @@ func (conn *tcpConn) LocalClosed() error {
 }
 
 func (conn *tcpConn) release() {
-	if _, found := tcpConns.Load(conn.connKey); found {
-		freeConnKeyArg(conn.connKeyArg)
-		tcpConns.Delete(conn.connKey)
-	}
+	GoPointerUnref(conn.connKey)
+
 	conn.sndPipeWriter.Close()
 	conn.sndPipeReader.Close()
 	conn.state = tcpClosed

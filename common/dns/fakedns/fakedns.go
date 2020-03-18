@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	FakeResponseTtl uint32 = 1          // in sec
+	FakeResponseTtl uint32 = 1 // in sec
 )
 
 type simpleFakeDns struct {

@@ -19,14 +19,14 @@ type tcpHandler struct {
 	proxyHost string
 	proxyPort uint16
 
-	fakeDns       dns.FakeDns
+	fakeDns dns.FakeDns
 }
 
 func NewTCPHandler(proxyHost string, proxyPort uint16, fakeDns dns.FakeDns) core.TCPConnHandler {
 	return &tcpHandler{
-		proxyHost:     proxyHost,
-		proxyPort:     proxyPort,
-		fakeDns:       fakeDns,
+		proxyHost: proxyHost,
+		proxyPort: proxyPort,
+		fakeDns:   fakeDns,
 	}
 }
 

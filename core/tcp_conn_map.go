@@ -4,30 +4,6 @@ package core
 #cgo CFLAGS: -I./c/custom -I./c/include
 #include "lwip/tcp.h"
 #include <stdlib.h>
-
-void*
-new_conn_key_arg()
-{
-	return malloc(sizeof(uint32_t));
-}
-
-void
-free_conn_key_arg(void *arg)
-{
-	free(arg);
-}
-
-void
-set_conn_key_val(void *arg, uint32_t val)
-{
-	*((uint32_t*)arg) = val;
-}
-
-uint32_t
-get_conn_key_val(void *arg)
-{
-	return *((uint32_t*)arg);
-}
 */
 import "C"
 import (
@@ -48,18 +24,43 @@ var tcpConns sync.Map
 //
 // See also:
 // https://github.com/golang/go/issues/12416
-func newConnKeyArg() unsafe.Pointer {
-	return C.new_conn_key_arg()
+
+// GoPointerSave save v(alue) and return the identifier unsafe.Pointer
+func GoPointerSave(v interface{}) unsafe.Pointer {
+	if v == nil {
+		return nil
+	}
+
+	// Generates a real fake C pointer.
+	// The pointer won't store any data but be used for indexing purposes.
+	// As Go doesn't allow to cast a dangling pointer to "unsafe.Pointer", we do really allocate one byte.
+	// Indexing is needed because Go doesn't allow C code to store pointers to Go data.
+	var ptr unsafe.Pointer = C.malloc(C.size_t(1))
+	if ptr == nil {
+		panic("Can't allocate 'cgo-pointer hack index pointer': ptr == nil")
+	}
+
+	tcpConns.Store(ptr, v)
+
+	return ptr
 }
 
-func freeConnKeyArg(p unsafe.Pointer) {
-	C.free_conn_key_arg(p)
+// GoPointerRestore retrive v(alue) via the identifier unsafe.Pointer
+func GoPointerRestore(ptr unsafe.Pointer) (v interface{}, ok bool) {
+	if ptr == nil {
+		return nil, false
+	}
+	v, ok = tcpConns.Load(ptr)
+	return
 }
 
-func setConnKeyVal(p unsafe.Pointer, val uint32) {
-	C.set_conn_key_val(p, C.uint32_t(val))
-}
+// GoPointerUnref remove and release identifier resource
+func GoPointerUnref(ptr unsafe.Pointer) {
+	if ptr == nil {
+		return
+	}
 
-func getConnKeyVal(p unsafe.Pointer) uint32 {
-	return uint32(C.get_conn_key_val(p))
+	tcpConns.Delete(ptr)
+
+	C.free(ptr)
 }

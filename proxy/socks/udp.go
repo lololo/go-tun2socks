@@ -28,20 +28,20 @@ type udpHandler struct {
 	remoteAddrs map[core.UDPConn]*net.UDPAddr // UDP relay server addresses
 	timeout     time.Duration
 
-	dnsCache      dns.DnsCache
-	fakeDns       dns.FakeDns
+	dnsCache dns.DnsCache
+	fakeDns  dns.FakeDns
 }
 
 func NewUDPHandler(proxyHost string, proxyPort uint16, timeout time.Duration, dnsCache dns.DnsCache, fakeDns dns.FakeDns) core.UDPConnHandler {
 	return &udpHandler{
-		proxyHost:     proxyHost,
-		proxyPort:     proxyPort,
-		udpConns:      make(map[core.UDPConn]net.PacketConn, 8),
-		tcpConns:      make(map[core.UDPConn]net.Conn, 8),
-		remoteAddrs:   make(map[core.UDPConn]*net.UDPAddr, 8),
-		dnsCache:      dnsCache,
-		fakeDns:       fakeDns,
-		timeout:       timeout,
+		proxyHost:   proxyHost,
+		proxyPort:   proxyPort,
+		udpConns:    make(map[core.UDPConn]net.PacketConn, 8),
+		tcpConns:    make(map[core.UDPConn]net.Conn, 8),
+		remoteAddrs: make(map[core.UDPConn]*net.UDPAddr, 8),
+		dnsCache:    dnsCache,
+		fakeDns:     fakeDns,
+		timeout:     timeout,
 	}
 }
 

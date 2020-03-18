@@ -6,8 +6,8 @@ package core
 */
 import "C"
 import (
-	"unsafe"
 	"github.com/eycorsican/go-tun2socks/component/pool"
+	"unsafe"
 )
 
 //export udpRecvFn
