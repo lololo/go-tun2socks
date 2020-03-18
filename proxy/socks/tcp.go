@@ -10,6 +10,7 @@ import (
 
 	"github.com/eycorsican/go-tun2socks/common/dns"
 	"github.com/eycorsican/go-tun2socks/common/log"
+	"github.com/eycorsican/go-tun2socks/component/pool"
 	"github.com/eycorsican/go-tun2socks/core"
 )
 
@@ -64,7 +65,9 @@ func relayGenerator(h *tcpHandler, src, dst net.Conn, dir direction) chan bool {
 	stopSig := make(chan bool)
 	go func(src, dst net.Conn, dir direction, stopChan chan bool) {
 		var err error
-		_, err = io.Copy(dst, src)
+		buf := pool.NewBytes(pool.BufSize)
+		_, err = io.CopyBuffer(dst, src, buf)
+		pool.FreeBytes(buf)
 		relayClose(src, dst, err)
 		close(stopChan) // send uplink finished signal
 	}(src, dst, dir, stopSig)

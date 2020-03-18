@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"strconv"
 	"sync"
@@ -52,7 +53,7 @@ func (h *udpHandler) handleTCP(conn core.UDPConn, c net.Conn) {
 	for {
 		// Don't timeout
 		c.SetDeadline(time.Time{})
-		_, err := c.Read(buf)
+		_, err := io.CopyBuffer(ioutil.Discard, c, buf)
 		if err == io.EOF {
 			log.Warnf("UDP associate to %v closed by remote", c.RemoteAddr())
 			h.Close(conn)
