@@ -11,7 +11,7 @@ import (
 
 	cdns "github.com/eycorsican/go-tun2socks/common/dns"
 	"github.com/eycorsican/go-tun2socks/common/log"
-	"github.com/eycorsican/go-tun2socks/core"
+	"github.com/eycorsican/go-tun2socks/component/pool"
 )
 
 const (
@@ -146,8 +146,8 @@ func (f *simpleFakeDns) GenerateFakeResponse(request []byte) ([]byte, error) {
 	} else {
 		return nil, fmt.Errorf("unexcepted dns qtype %v", qtype)
 	}
-	buf := core.NewBytes(core.BufSize)
-	defer core.FreeBytes(buf)
+	buf := pool.NewBytes(pool.BufSize)
+	defer pool.FreeBytes(buf)
 	dnsAnswer, err := resp.PackBuffer(buf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pack dns answer: %v", err)
