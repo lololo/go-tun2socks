@@ -61,13 +61,16 @@
 #define LWIP_IPV6_MLD 0
 #define LWIP_IPV6_AUTOCONFIG 1
 
-#define MEMP_NUM_TCP_PCB_LISTEN 16
+#define MEMP_NUM_TCP_PCB_LISTEN 5
 #define MEMP_NUM_TCP_PCB 1024
 #define MEMP_NUM_UDP_PCB 512
-#define MEMP_NUM_TCP_SEG 128
+
+#define PBUF_POOL_SIZE 128
 
 #define TCP_MSS 1460
-#define TCP_SND_BUF (65535)
+#define TCP_SND_BUF                     (44 * TCP_MSS)
+
+#define MEMP_NUM_TCP_SEG                TCP_SND_QUEUELEN
 
 #define LWIP_TCP_SACK_OUT 1
 #define LWIP_TCP_KEEPALIVE 1
@@ -76,7 +79,7 @@
 #define TCP_RCV_SCALE                   2
 
 #define MEM_LIBC_MALLOC 1
-#define MEMP_MEM_MALLOC 1
+#define MEMP_MEM_MALLOC 0
 #define MEM_ALIGNMENT 4
 #define MEM_SIZE 128 * 1024
 
