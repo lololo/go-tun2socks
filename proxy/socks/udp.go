@@ -11,8 +11,6 @@ import (
 
 	"github.com/eycorsican/go-tun2socks/common/dns"
 	"github.com/eycorsican/go-tun2socks/common/log"
-	"github.com/eycorsican/go-tun2socks/common/lsof"
-	"github.com/eycorsican/go-tun2socks/common/stats"
 	"github.com/eycorsican/go-tun2socks/core"
 )
 
@@ -31,10 +29,9 @@ type udpHandler struct {
 
 	dnsCache      dns.DnsCache
 	fakeDns       dns.FakeDns
-	sessionStater stats.SessionStater
 }
 
-func NewUDPHandler(proxyHost string, proxyPort uint16, timeout time.Duration, dnsCache dns.DnsCache, fakeDns dns.FakeDns, sessionStater stats.SessionStater) core.UDPConnHandler {
+func NewUDPHandler(proxyHost string, proxyPort uint16, timeout time.Duration, dnsCache dns.DnsCache, fakeDns dns.FakeDns) core.UDPConnHandler {
 	return &udpHandler{
 		proxyHost:     proxyHost,
 		proxyPort:     proxyPort,
@@ -44,7 +41,6 @@ func NewUDPHandler(proxyHost string, proxyPort uint16, timeout time.Duration, dn
 		dnsCache:      dnsCache,
 		fakeDns:       fakeDns,
 		timeout:       timeout,
-		sessionStater: sessionStater,
 	}
 }
 
@@ -91,11 +87,6 @@ func (h *udpHandler) fetchUDPInput(conn core.UDPConn, input net.PacketConn) {
 		}
 		log.Infof("udp resolvedAddr: %v", resolvedAddr)
 		n, err = conn.WriteFrom(buf[int(3+len(addr)):n], resolvedAddr)
-		if n > 0 && h.sessionStater != nil {
-			if sess := h.sessionStater.GetSession(conn); sess != nil {
-				sess.AddDownloadBytes(int64(n))
-			}
-		}
 		if err != nil {
 			log.Warnf("write local failed: %v", err)
 			return
@@ -195,27 +186,7 @@ func (h *udpHandler) connectInternal(conn core.UDPConn, dest string) error {
 	go h.fetchUDPInput(conn, pc)
 
 	if len(dest) != 0 {
-		var process string
-		if h.sessionStater != nil {
-			// Get name of the process.
-			localHost, localPortStr, _ := net.SplitHostPort(conn.LocalAddr().String())
-			localPortInt, _ := strconv.Atoi(localPortStr)
-			process, err = lsof.GetCommandNameBySocket(conn.LocalAddr().Network(), localHost, uint16(localPortInt))
-			if err != nil {
-				process = "unknown process"
-			}
-
-			sess := &stats.Session{
-				process,
-				conn.LocalAddr().Network(),
-				conn.LocalAddr().String(),
-				dest,
-				0,
-				0,
-				time.Now(),
-			}
-			h.sessionStater.AddSession(conn, sess)
-		}
+		var process string = "N/A"
 		log.Access(process, "proxy", "udp", conn.LocalAddr().String(), dest)
 	}
 	return nil
@@ -272,12 +243,7 @@ func (h *udpHandler) ReceiveTo(conn core.UDPConn, data []byte, addr *net.UDPAddr
 
 		buf := append([]byte{0, 0, 0}, ParseAddr(dest)...)
 		buf = append(buf, data[:]...)
-		n, err := pc.WriteTo(buf, remoteAddr)
-		if n > 0 && h.sessionStater != nil {
-			if sess := h.sessionStater.GetSession(conn); sess != nil {
-				sess.AddUploadBytes(int64(n))
-			}
-		}
+		_, err := pc.WriteTo(buf, remoteAddr)
 		if err != nil {
 			h.Close(conn)
 			return errors.New(fmt.Sprintf("write remote failed: %v", err))
@@ -304,8 +270,4 @@ func (h *udpHandler) Close(conn core.UDPConn) {
 		delete(h.udpConns, conn)
 	}
 	delete(h.remoteAddrs, conn)
-
-	if h.sessionStater != nil {
-		h.sessionStater.RemoveSession(conn)
-	}
 }

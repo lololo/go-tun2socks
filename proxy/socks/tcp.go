@@ -5,14 +5,11 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"time"
 
 	"golang.org/x/net/proxy"
 
 	"github.com/eycorsican/go-tun2socks/common/dns"
 	"github.com/eycorsican/go-tun2socks/common/log"
-	"github.com/eycorsican/go-tun2socks/common/lsof"
-	"github.com/eycorsican/go-tun2socks/common/stats"
 	"github.com/eycorsican/go-tun2socks/core"
 )
 
@@ -23,15 +20,13 @@ type tcpHandler struct {
 	proxyPort uint16
 
 	fakeDns       dns.FakeDns
-	sessionStater stats.SessionStater
 }
 
-func NewTCPHandler(proxyHost string, proxyPort uint16, fakeDns dns.FakeDns, sessionStater stats.SessionStater) core.TCPConnHandler {
+func NewTCPHandler(proxyHost string, proxyPort uint16, fakeDns dns.FakeDns) core.TCPConnHandler {
 	return &tcpHandler{
 		proxyHost:     proxyHost,
 		proxyPort:     proxyPort,
 		fakeDns:       fakeDns,
-		sessionStater: sessionStater,
 	}
 }
 
@@ -41,41 +36,6 @@ const (
 	dirUplink direction = iota
 	dirDownlink
 )
-
-func statsCopy(dst io.Writer, src io.Reader, sess *stats.Session, dir direction) (written int64, err error) {
-	buf := make([]byte, 32*1024)
-	for {
-		nr, er := src.Read(buf)
-		if nr > 0 {
-			nw, ew := dst.Write(buf[0:nr])
-			if nw > 0 {
-				switch dir {
-				case dirUplink:
-					sess.AddUploadBytes(int64(nw))
-				case dirDownlink:
-					sess.AddDownloadBytes(int64(nw))
-				default:
-				}
-				written += int64(nw)
-			}
-			if ew != nil {
-				err = ew
-				break
-			}
-			if nr != nw {
-				err = io.ErrShortWrite
-				break
-			}
-		}
-		if er != nil {
-			if er != io.EOF {
-				err = er
-			}
-			break
-		}
-	}
-	return written, err
-}
 
 type duplexConn interface {
 	net.Conn
@@ -100,31 +60,23 @@ func relayClose(src, dst net.Conn, closeErr error) {
 	}
 }
 
-func relayGenerator(h *tcpHandler, src, dst net.Conn, dir direction, sess *stats.Session) chan bool {
+func relayGenerator(h *tcpHandler, src, dst net.Conn, dir direction) chan bool {
 	stopSig := make(chan bool)
-	go func(src, dst net.Conn, dir direction, sess *stats.Session, stopChan chan bool) {
+	go func(src, dst net.Conn, dir direction, stopChan chan bool) {
 		var err error
-		if h.sessionStater != nil && sess != nil {
-			_, err = statsCopy(dst, src, sess, dir)
-		} else {
-			_, err = io.Copy(dst, src)
-		}
+		_, err = io.Copy(dst, src)
 		relayClose(src, dst, err)
 		close(stopChan) // send uplink finished signal
-	}(src, dst, dir, sess, stopSig)
+	}(src, dst, dir, stopSig)
 	return stopSig
 }
 
-func (h *tcpHandler) relay(lhs, rhs net.Conn, sess *stats.Session) {
-	uplinkSig := relayGenerator(h, lhs, rhs, dirUplink, sess)
-	downlinkSig := relayGenerator(h, rhs, lhs, dirDownlink, sess)
+func (h *tcpHandler) relay(lhs, rhs net.Conn) {
+	uplinkSig := relayGenerator(h, lhs, rhs, dirUplink)
+	downlinkSig := relayGenerator(h, rhs, lhs, dirDownlink)
 
 	<-uplinkSig
 	<-downlinkSig
-
-	if h.sessionStater != nil {
-		h.sessionStater.RemoveSession(lhs)
-	}
 }
 
 func (h *tcpHandler) Handle(conn net.Conn, target *net.TCPAddr) error {
@@ -147,30 +99,9 @@ func (h *tcpHandler) Handle(conn net.Conn, target *net.TCPAddr) error {
 		return err
 	}
 
-	var process string
-	var sess *stats.Session
-	if h.sessionStater != nil {
-		// Get name of the process.
-		localHost, localPortStr, _ := net.SplitHostPort(conn.LocalAddr().String())
-		localPortInt, _ := strconv.Atoi(localPortStr)
-		process, err = lsof.GetCommandNameBySocket(target.Network(), localHost, uint16(localPortInt))
-		if err != nil {
-			process = "unknown process"
-		}
+	var process string = "N/A"
 
-		sess = &stats.Session{
-			process,
-			target.Network(),
-			conn.LocalAddr().String(),
-			dest,
-			0,
-			0,
-			time.Now(),
-		}
-		h.sessionStater.AddSession(conn, sess)
-	}
-
-	go h.relay(conn, c, sess)
+	go h.relay(conn, c)
 
 	log.Access(process, "proxy", target.Network(), conn.LocalAddr().String(), dest)
 
