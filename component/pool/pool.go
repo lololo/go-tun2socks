@@ -17,7 +17,8 @@ func NewBytes(size int) []byte {
 }
 
 func FreeBytes(b []byte) {
-	if len(b) >= BufSize {
+	b = b[0:cap(b)] // restore slice
+	if cap(b) >= BufSize {
 		pool.Put(b)
 	}
 }
