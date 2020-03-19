@@ -104,6 +104,10 @@ func (h *tcpHandler) Handle(conn net.Conn, target *net.TCPAddr) error {
 
 	var process string = "N/A"
 
+	// Set keepalive
+	tcpKeepAlive(conn)
+	tcpKeepAlive(c)
+
 	go h.relay(conn, c)
 
 	log.Access(process, "proxy", target.Network(), conn.LocalAddr().String(), dest)

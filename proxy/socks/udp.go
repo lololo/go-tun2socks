@@ -129,11 +129,15 @@ func (h *udpHandler) Connect(conn core.UDPConn, target *net.UDPAddr) error {
 
 func (h *udpHandler) connectInternal(conn core.UDPConn, dest string) error {
 	log.Infof("connectInternal: dest is %v", dest)
-	c, err := net.DialTimeout("tcp", core.ParseTCPAddr(h.proxyHost, h.proxyPort).String(), 4*time.Second)
+	c, err := net.DialTimeout("tcp", core.ParseTCPAddr(h.proxyHost, h.proxyPort).String(), 30*time.Second)
 	if err != nil {
 		return err
 	}
-	c.SetDeadline(time.Now().Add(4 * time.Second))
+
+	// tcp set keepalive
+	tcpKeepAlive(c)
+
+	c.SetDeadline(time.Now().Add(30 * time.Second))
 
 	// send VER, NMETHODS, METHODS
 	c.Write([]byte{5, 1, 0})
