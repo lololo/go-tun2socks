@@ -15,6 +15,7 @@ import "C"
 import (
 	"encoding/binary"
 	"errors"
+	"log"
 	"unsafe"
 )
 
@@ -85,18 +86,9 @@ func peekNextProto(ipv ipver, p []byte) (proto, error) {
 }
 
 func Input(pkt []byte) (int, error) {
-	if len(pkt) == 0 {
+	pktLen := len(pkt)
+	if pktLen == 0 {
 		return 0, nil
-	}
-
-	ipv, err := peekIPVer(pkt)
-	if err != nil {
-		return 0, err
-	}
-
-	nextProto, err := peekNextProto(ipv, pkt)
-	if err != nil {
-		return 0, err
 	}
 
 	lwipMutex.Lock()
@@ -104,24 +96,31 @@ func Input(pkt []byte) (int, error) {
 
 	var buf *C.struct_pbuf
 
-	if nextProto == proto_udp && !(moreFrags(ipv, pkt) || fragOffset(ipv, pkt) > 0) {
-		// Copying data is not necessary for unfragmented UDP packets, and we would like to
-		// have all data in one pbuf.
-		buf = C.pbuf_alloc_reference(unsafe.Pointer(&pkt[0]), C.u16_t(len(pkt)), C.PBUF_REF)
-	} else {
-		// TODO Copy the data only when lwip need to keep it, e.g. in
-		// case we are returning ERR_CONN in tcpRecvFn.
-		//
-		// Allocating from PBUF_POOL results in a pbuf chain that may
-		// contain multiple pbufs.
-		buf = C.pbuf_alloc(C.PBUF_RAW, C.u16_t(len(pkt)), C.PBUF_POOL)
-		C.pbuf_take(buf, unsafe.Pointer(&pkt[0]), C.u16_t(len(pkt)))
+	// TODO Copy the data only when lwip need to keep it, e.g. in
+	// case we are returning ERR_CONN in tcpRecvFn.
+	//
+	// XXX: always copy since the address might got moved to other location during GC
+
+	// PBUF_POOL  pbuf payload refers to RAM. This one comes from a pool and should be used for RX.
+	// Payload can be chained (scatter-gather RX) but like PBUF_RAM, struct pbuf and its payload are allocated in one piece of contiguous memory
+	// (so the first payload byte can be calculated from struct pbuf). Don't use this for TX, if the pool becomes empty e.g. because of TCP queuing,
+	// you are unable to receive TCP acks!
+
+	buf = C.pbuf_alloc(C.PBUF_RAW, C.u16_t(pktLen), C.PBUF_POOL)
+	if buf == nil {
+		return 0, errors.New("lwip Input() pbuf_alloc returns NULL")
 	}
+	C.pbuf_take(buf, unsafe.Pointer(&pkt[0]), C.u16_t(pktLen))
 
 	ierr := C.input(buf)
+	defer func() {
+		if ierr != C.ERR_OK && buf != nil {
+			C.pbuf_free(buf)
+		}
+	}()
 	if ierr != C.ERR_OK {
-		C.pbuf_free(buf)
+		log.Printf("lwip Input() input error code %v", ierr)
 		return 0, errors.New("packet not handled")
 	}
-	return len(pkt), nil
+	return pktLen, nil
 }
