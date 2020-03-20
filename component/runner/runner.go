@@ -1,37 +1,40 @@
 package runner
 
 import (
-	"sync"
+	"sync/atomic"
 )
 
 // S is a function that will return true if the
 // goroutine should stop executing.
 type S func() bool
 
+const (
+	FALSE int32 = 0
+	TRUE  int32 = 1
+)
+
 // Go executes the function in a goroutine and returns a
 // Task capable of stopping the execution.
 func Go(fn func(S) error) *Task {
+	var run, stop int32
 	t := &Task{
-		stopChan: make(chan struct{}),
-		running:  true,
+		stopChan:   make(chan struct{}),
+		running:    &run,
+		shouldStop: &stop,
 	}
+	atomic.StoreInt32(t.shouldStop, FALSE)
+	atomic.StoreInt32(t.running, TRUE)
 	go func() {
 		// call the target function
 		err := fn(func() bool {
 			// this is the shouldStop() function available to the
 			// target function
-			t.lock.RLock()
-			shouldStop := t.shouldStop
-			t.lock.RUnlock()
-			return shouldStop
+			shouldStop := atomic.LoadInt32(t.shouldStop)
+			return shouldStop == TRUE
 		})
-		// stopped
-		t.lock.Lock()
-		t.err = err
-		t.running = false
-
+		t.err.Store(err)
+		atomic.StoreInt32(t.running, FALSE)
 		close(t.stopChan)
-		t.lock.Unlock()
 	}()
 	return t
 }
@@ -39,20 +42,17 @@ func Go(fn func(S) error) *Task {
 // Task represents an interruptable goroutine.
 type Task struct {
 	ID         string
-	lock       sync.RWMutex
 	stopChan   chan struct{}
-	shouldStop bool
-	running    bool
-	err        error
+	shouldStop *int32
+	running    *int32
+	err        atomic.Value
 }
 
 // Stop tells the goroutine to stop.
 func (t *Task) Stop() {
 	// When task is stopped from a different go-routine other than the one
 	// that actually started it.
-	t.lock.Lock()
-	t.shouldStop = true
-	t.lock.Unlock()
+	atomic.StoreInt32(t.shouldStop, TRUE)
 }
 
 // StopChan gets the stop channel for this task.
@@ -65,16 +65,12 @@ func (t *Task) StopChan() <-chan struct{} {
 // Running gets whether the goroutine is
 // running or not.
 func (t *Task) Running() bool {
-	t.lock.RLock()
-	running := t.running
-	t.lock.RUnlock()
-	return running
+	running := atomic.LoadInt32(t.running)
+	return running == TRUE
 }
 
 // Err gets the error returned by the goroutine.
 func (t *Task) Err() error {
-	t.lock.RLock()
-	err := t.err
-	t.lock.RUnlock()
-	return err
+	err := t.err.Load()
+	return err.(error)
 }

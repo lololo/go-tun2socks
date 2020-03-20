@@ -8,6 +8,7 @@ package core
 */
 import "C"
 import (
+	"errors"
 	"log"
 	"sync"
 	"time"
@@ -78,6 +79,7 @@ func NewLWIPStack() LWIPStack {
 		// defer func(){
 		//   // do teardown
 		// }
+		zeroErr := errors.New("no error")
 		for {
 			// do some work
 			lwipMutex.Lock()
@@ -90,7 +92,7 @@ func NewLWIPStack() LWIPStack {
 			}
 		}
 		log.Printf("got sys_check_timeouts stop signal")
-		return nil // any errors?
+		return zeroErr // any errors?
 	})
 
 	return &lwipStack{
