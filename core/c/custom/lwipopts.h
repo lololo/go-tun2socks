@@ -78,7 +78,7 @@
 #define LWIP_WND_SCALE                  1
 #define TCP_RCV_SCALE                   2
 
-#define MEM_LIBC_MALLOC 1
+#define MEM_LIBC_MALLOC 0
 #define MEMP_MEM_MALLOC 0
 #define MEM_ALIGNMENT 4
 #define MEM_SIZE 128 * 1024
@@ -135,21 +135,22 @@
 
 #else // TUN2SOCKS_DEBUG
 
+#undef LWIP_NOASSERT
 #define LWIP_DEBUG 0
 
 #define LWIP_DBG_MIN_LEVEL              LWIP_DBG_LEVEL_WARNING
 #define LWIP_DBG_TYPES_ON               LWIP_DBG_OFF
 #define ETHARP_DEBUG                    LWIP_DBG_OFF
 #define NETIF_DEBUG                     LWIP_DBG_OFF
-#define PBUF_DEBUG                      LWIP_DBG_OFF
+#define PBUF_DEBUG                      LWIP_DBG_ON
 #define ICMP_DEBUG                      LWIP_DBG_OFF
 #define IGMP_DEBUG                      LWIP_DBG_OFF
 #define INET_DEBUG                      LWIP_DBG_OFF
 #define IP_DEBUG                        LWIP_DBG_OFF
 #define IP_REASS_DEBUG                  LWIP_DBG_OFF
 #define RAW_DEBUG                       LWIP_DBG_OFF
-#define MEM_DEBUG                       LWIP_DBG_OFF
-#define MEMP_DEBUG                      LWIP_DBG_OFF
+#define MEM_DEBUG                       LWIP_DBG_ON
+#define MEMP_DEBUG                      LWIP_DBG_ON
 #define SYS_DEBUG                       LWIP_DBG_OFF
 #define TIMERS_DEBUG                    LWIP_DBG_OFF
 #define TCP_DEBUG                       LWIP_DBG_OFF
