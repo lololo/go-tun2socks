@@ -10,9 +10,10 @@ import "C"
 import (
 	"log"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/eycorsican/go-tun2socks/component/runner"
 )
 
 const CHECK_TIMEOUTS_INTERVAL = 250 // in millisecond
@@ -28,10 +29,9 @@ type LWIPStack interface {
 var lwipMutex = &sync.Mutex{}
 
 type lwipStack struct {
-	tpcb       *C.struct_tcp_pcb
-	upcb       *C.struct_udp_pcb
-	isShutdown *int64          //sys_check_timeouts shutdown flag
-	shutdownWg *sync.WaitGroup //sys_check_timeouts Semaphore
+	tpcb                     *C.struct_tcp_pcb
+	upcb                     *C.struct_udp_pcb
+	lwipSysCheckTimeoutsTask *runner.Task
 }
 
 // NewLWIPStack listens for any incoming connections/packets and registers
@@ -73,36 +73,31 @@ func NewLWIPStack() LWIPStack {
 	}
 
 	setUDPRecvCallback(udpPCB, nil)
-	var stopFlag int64
-	atomic.StoreInt64(&stopFlag, 0)
+	task := runner.Go(func(shouldStop runner.S) error {
+		// do setup
+		// defer func(){
+		//   // do teardown
+		// }
+		for {
+			// do some work
+			lwipMutex.Lock()
+			C.sys_check_timeouts()
+			lwipMutex.Unlock()
 
-	// reinit on each startup
-	waitGroup := &sync.WaitGroup{}
-	go lwipSysCheckTimeoutsWorker(waitGroup, &stopFlag, CHECK_TIMEOUTS_INTERVAL*time.Millisecond)
+			time.Sleep(CHECK_TIMEOUTS_INTERVAL * time.Millisecond)
+			if shouldStop() {
+				break
+			}
+		}
+		log.Printf("got sys_check_timeouts stop signal")
+		return nil // any errors?
+	})
 
 	return &lwipStack{
-		tpcb:       tcpPCB,
-		upcb:       udpPCB,
-		isShutdown: &stopFlag,
-		shutdownWg: waitGroup,
+		tpcb:                     tcpPCB,
+		upcb:                     udpPCB,
+		lwipSysCheckTimeoutsTask: task,
 	}
-}
-
-func lwipSysCheckTimeoutsWorker(wg *sync.WaitGroup, isShutdown *int64, d time.Duration) {
-	defer wg.Done()
-
-	for {
-		if atomic.LoadInt64(isShutdown) == 1 {
-			break
-		}
-
-		lwipMutex.Lock()
-		C.sys_check_timeouts()
-		lwipMutex.Unlock()
-
-		time.Sleep(d)
-	}
-	log.Printf("got sys_check_timeouts stop signal")
 }
 
 func (s *lwipStack) Write(data []byte) (int, error) {
@@ -141,10 +136,8 @@ func (s *lwipStack) Close() error {
 	// free UDP pcb
 	C.udp_remove(s.upcb)
 
-	//wait for sys_check_timeouts goroutine
-	s.shutdownWg.Add(1)
-	atomic.StoreInt64(s.isShutdown, 1)
-	s.shutdownWg.Wait()
+	s.lwipSysCheckTimeoutsTask.Stop()
+	<-s.lwipSysCheckTimeoutsTask.StopChan()
 
 	return nil
 }
