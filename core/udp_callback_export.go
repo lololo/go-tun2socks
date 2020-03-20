@@ -6,12 +6,16 @@ package core
 */
 import "C"
 import (
-	"github.com/eycorsican/go-tun2socks/component/pool"
 	"unsafe"
+
+	"github.com/eycorsican/go-tun2socks/component/pool"
 )
 
 //export udpRecvFn
 func udpRecvFn(arg unsafe.Pointer, pcb *C.struct_udp_pcb, p *C.struct_pbuf, addr *C.ip_addr_t, port C.u16_t, destAddr *C.ip_addr_t, destPort C.u16_t) {
+	// XXX:  * ATTENTION: Be aware that 'addr' might point into the pbuf 'p' so freeing this pbuf
+	//       *            can make 'addr' invalid, too.
+	// Let's copy addr in case accessing invalid pointer
 	defer func() {
 		if p != nil {
 			C.pbuf_free(p)
@@ -21,9 +25,12 @@ func udpRecvFn(arg unsafe.Pointer, pcb *C.struct_udp_pcb, p *C.struct_pbuf, addr
 	if pcb == nil {
 		return
 	}
-
-	srcAddr := ParseUDPAddr(ipAddrNTOA(*addr), uint16(port))
-	dstAddr := ParseUDPAddr(ipAddrNTOA(*destAddr), uint16(destPort))
+	addrCopy := C.ip_addr_t{}
+	destAddrCopy := C.ip_addr_t{}
+	copyLwipIpAddr(&addrCopy, addr)
+	copyLwipIpAddr(&destAddrCopy, destAddr)
+	srcAddr := ParseUDPAddr(ipAddrNTOA(addrCopy), uint16(port))
+	dstAddr := ParseUDPAddr(ipAddrNTOA(destAddrCopy), uint16(destPort))
 	if srcAddr == nil || dstAddr == nil {
 		panic("invalid UDP address")
 	}
@@ -39,7 +46,7 @@ func udpRecvFn(arg unsafe.Pointer, pcb *C.struct_udp_pcb, p *C.struct_pbuf, addr
 		var err error
 		conn, err = newUDPConn(pcb,
 			udpConnHandler,
-			*addr,
+			addrCopy,
 			port,
 			srcAddr,
 			dstAddr)

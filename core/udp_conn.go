@@ -152,12 +152,10 @@ func (conn *udpConn) WriteFrom(data []byte, addr *net.UDPAddr) (int, error) {
 		return 0, errors.New("udpConn WriteFrom pbuf_alloc returns NULL")
 	}
 	C.pbuf_take(buf, unsafe.Pointer(&data[0]), C.u16_t(dataLen))
-	defer func() {
-		if buf != nil {
-			C.pbuf_free(buf)
-		}
-	}()
 	C.udp_sendto(conn.pcb, buf, &conn.localIP, conn.localPort, &cremoteIP, C.u16_t(addr.Port))
+	if buf != nil {
+		C.pbuf_free(buf)
+	}
 	return dataLen, nil
 }
 

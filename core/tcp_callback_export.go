@@ -8,8 +8,10 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	"github.com/eycorsican/go-tun2socks/component/pool"
+	"log"
 	"unsafe"
+
+	"github.com/eycorsican/go-tun2socks/component/pool"
 )
 
 // These exported callback functions must be placed in a seperated file.
@@ -43,24 +45,29 @@ func tcpAcceptFn(arg unsafe.Pointer, newpcb *C.struct_tcp_pcb, err C.err_t) C.er
 }
 
 //export tcpRecvFn
-func tcpRecvFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, p *C.struct_pbuf, err C.err_t) C.err_t {
-	if err != C.ERR_OK && err != C.ERR_ABRT {
-		return err
-	}
-
+func tcpRecvFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, p *C.struct_pbuf, passedInErr C.err_t) C.err_t {
 	// Only free the pbuf when returning ERR_OK or ERR_ABRT,
 	// otherwise must not free the pbuf.
-	shouldFreePbuf := true
+	shouldFreePbuf := false
 	defer func() {
 		if p != nil && shouldFreePbuf {
 			C.pbuf_free(p)
 		}
 	}()
 
+	if passedInErr != C.ERR_OK && passedInErr != C.ERR_ABRT {
+		// TODO: unknown err passed in, not sure if it's correct
+		log.Printf("tcpRecvFn passed in err: %v , begin abort", int(passedInErr))
+		C.tcp_abort(tpcb)
+		shouldFreePbuf = true
+		return C.ERR_ABRT
+	}
+
 	conn, ok := GoPointerRestore(arg)
 	if !ok {
 		// The connection does not exists.
 		C.tcp_abort(tpcb)
+		shouldFreePbuf = true
 		return C.ERR_ABRT
 	}
 
@@ -69,8 +76,10 @@ func tcpRecvFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, p *C.struct_pbuf, err
 		err := conn.(TCPConn).LocalClosed()
 		switch err.(*lwipError).Code {
 		case LWIP_ERR_ABRT:
+			shouldFreePbuf = true
 			return C.ERR_ABRT
 		case LWIP_ERR_OK:
+			shouldFreePbuf = true
 			return C.ERR_OK
 		default:
 			panic("unexpected error")
@@ -91,16 +100,16 @@ func tcpRecvFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, p *C.struct_pbuf, err
 	if rerr != nil {
 		switch rerr.(*lwipError).Code {
 		case LWIP_ERR_ABRT:
+			shouldFreePbuf = true
 			return C.ERR_ABRT
 		case LWIP_ERR_OK:
+			shouldFreePbuf = true
 			return C.ERR_OK
 		case LWIP_ERR_CONN:
-			shouldFreePbuf = false
 			// Tell lwip we can't receive data at the moment,
 			// lwip will store it and try again later.
 			return C.ERR_CONN
 		case LWIP_ERR_CLSD:
-			shouldFreePbuf = false
 			// lwip won't handle ERR_CLSD error for us, manually
 			// shuts down the rx side.
 			C.tcp_shutdown(tpcb, 1, 0)
@@ -110,6 +119,7 @@ func tcpRecvFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, p *C.struct_pbuf, err
 		}
 	}
 
+	shouldFreePbuf = true
 	return C.ERR_OK
 }
 

@@ -113,12 +113,10 @@ func Input(pkt []byte) (int, error) {
 	C.pbuf_take(buf, unsafe.Pointer(&pkt[0]), C.u16_t(pktLen))
 
 	ierr := C.input(buf)
-	defer func() {
-		if ierr != C.ERR_OK && buf != nil {
+	if ierr != C.ERR_OK {
+		if buf != nil {
 			C.pbuf_free(buf)
 		}
-	}()
-	if ierr != C.ERR_OK {
 		log.Printf("lwip Input() input error code %v", ierr)
 		return 0, errors.New("packet not handled")
 	}
