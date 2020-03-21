@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"sync"
 	"sync/atomic"
 )
 
@@ -34,7 +35,9 @@ func Go(fn func(S) error) *Task {
 		})
 		t.err.Store(err)
 		atomic.StoreInt32(t.running, FALSE)
-		close(t.stopChan)
+		var closeOnce sync.Once
+
+		closeOnce.Do(t.closeOnceBody)
 	}()
 	return t
 }
@@ -46,6 +49,11 @@ type Task struct {
 	shouldStop *int32
 	running    *int32
 	err        atomic.Value
+}
+
+func (t *Task) closeOnceBody() {
+	// channel closing is actually a sending operation
+	close(t.stopChan)
 }
 
 // Stop tells the goroutine to stop.
