@@ -137,9 +137,10 @@ func (s *lwipStack) Close() error {
 
 	// free UDP pcb
 	C.udp_remove(s.upcb)
-
-	s.lwipSysCheckTimeoutsTask.Stop()
-	<-s.lwipSysCheckTimeoutsTask.StopChan()
+	if s.lwipSysCheckTimeoutsTask.Running() {
+		s.lwipSysCheckTimeoutsTask.Stop()
+		<-s.lwipSysCheckTimeoutsTask.StopChan()
+	}
 
 	return nil
 }
