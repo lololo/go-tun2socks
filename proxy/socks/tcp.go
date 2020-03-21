@@ -44,12 +44,14 @@ type duplexConn interface {
 	CloseWrite() error
 }
 
-func relayClose(src, dst net.Conn, closeErr error) {
+func relayClose(src, dst net.Conn, closeErr error, closeOnce *sync.Once) {
 	// interrupt the conn if the error is not nil (not EOF)
 	// half close uplink direction of the TCP conn if possible
 	if closeErr != nil {
-		src.Close()
-		dst.Close()
+		closeOnce.Do(func() {
+			src.Close()
+			dst.Close()
+		})
 		return
 	}
 
@@ -61,22 +63,24 @@ func relayClose(src, dst net.Conn, closeErr error) {
 	}
 }
 
-func relayGenerator(h *tcpHandler, src, dst net.Conn, dir direction) chan bool {
+func relayGenerator(h *tcpHandler, src, dst net.Conn, dir direction, closeOnce *sync.Once) chan bool {
 	stopSig := make(chan bool)
 	go func(src, dst net.Conn, dir direction, stopChan chan bool) {
 		var err error
 		buf := pool.NewBytes(pool.BufSize)
 		_, err = io.CopyBuffer(dst, src, buf)
 		pool.FreeBytes(buf)
-		relayClose(src, dst, err)
+		relayClose(src, dst, err, closeOnce)
 		close(stopChan) // send uplink finished signal
 	}(src, dst, dir, stopSig)
 	return stopSig
 }
 
 func (h *tcpHandler) relay(lhs, rhs net.Conn) {
-	uplinkSig := relayGenerator(h, lhs, rhs, dirUplink)
-	downlinkSig := relayGenerator(h, rhs, lhs, dirDownlink)
+	// both uplink and downlink use the same sync.Once instance
+	var closeOnce sync.Once
+	uplinkSig := relayGenerator(h, lhs, rhs, dirUplink, &closeOnce)
+	downlinkSig := relayGenerator(h, rhs, lhs, dirDownlink, &closeOnce)
 
 	<-uplinkSig
 	<-downlinkSig
