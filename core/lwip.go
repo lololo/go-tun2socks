@@ -33,17 +33,27 @@ type lwipStack struct {
 	tpcb                     *C.struct_tcp_pcb
 	upcb                     *C.struct_udp_pcb
 	lwipSysCheckTimeoutsTask *runner.Task
+	enableIPv6               bool
 }
 
 // NewLWIPStack listens for any incoming connections/packets and registers
 // corresponding accept/recv callback functions.
-func NewLWIPStack() LWIPStack {
-	tcpPCB := C.tcp_new_ip_type(C.IPADDR_TYPE_ANY)
+func NewLWIPStack(enableIPv6 bool) LWIPStack {
+	var tcpPCB *C.struct_tcp_pcb
+	var udpPCB *C.struct_udp_pcb
+
+	if enableIPv6 {
+		tcpPCB = C.tcp_new_ip_type(C.IPADDR_TYPE_ANY)
+	} else {
+		tcpPCB = C.tcp_new_ip_type(C.IPADDR_TYPE_V4)
+	}
+
 	if tcpPCB == nil {
 		panic("tcp_new return nil")
 	}
 
 	err := C.tcp_bind(tcpPCB, C.IP_ADDR_ANY, 0)
+
 	switch err {
 	case C.ERR_OK:
 		break
@@ -63,7 +73,11 @@ func NewLWIPStack() LWIPStack {
 
 	setTCPAcceptCallback(tcpPCB)
 
-	udpPCB := C.udp_new_ip_type(C.IPADDR_TYPE_ANY)
+	if enableIPv6 {
+		udpPCB = C.udp_new_ip_type(C.IPADDR_TYPE_ANY)
+	} else {
+		udpPCB = C.udp_new_ip_type(C.IPADDR_TYPE_V4)
+	}
 	if udpPCB == nil {
 		panic("could not allocate udp pcb")
 	}
@@ -99,6 +113,7 @@ func NewLWIPStack() LWIPStack {
 		tpcb:                     tcpPCB,
 		upcb:                     udpPCB,
 		lwipSysCheckTimeoutsTask: task,
+		enableIPv6:               enableIPv6,
 	}
 }
 
