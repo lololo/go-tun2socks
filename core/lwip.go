@@ -9,36 +9,56 @@ package core
 import "C"
 import (
 	"errors"
-	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
+	"github.com/eycorsican/go-tun2socks/common/log"
 	"github.com/eycorsican/go-tun2socks/component/runner"
 )
 
 const CHECK_TIMEOUTS_INTERVAL = 250 // in millisecond
 const TCP_POLL_INTERVAL = 8         // poll every 4 seconds
 
+type LWIPSysCheckTimeoutsClosingType uint
+
+const (
+	INSTANT LWIPSysCheckTimeoutsClosingType = iota
+	DELAY
+)
+
 type LWIPStack interface {
 	Write([]byte) (int, error)
-	Close() error
+	Close(LWIPSysCheckTimeoutsClosingType) error
 	RestartTimeouts()
+	GetRunningStatus() bool
+	StartTimeouts()
+	StopTimeouts(LWIPSysCheckTimeoutsClosingType)
 }
 
 // lwIP runs in a single thread, locking is needed in Go runtime.
 var lwipMutex = &sync.Mutex{}
 
+var lwipSysCheckTimeoutsLock = &sync.Mutex{}
+
 type lwipStack struct {
-	tpcb                     *C.struct_tcp_pcb
-	upcb                     *C.struct_udp_pcb
-	lwipSysCheckTimeoutsTask *runner.Task
-	enableIPv6               bool
+	IsRunning                     *int32
+	tpcb                          *C.struct_tcp_pcb
+	upcb                          *C.struct_udp_pcb
+	LWIPSysCheckTimeoutsTask      *runner.Task
+	LWIPSysStopCheckTimeoutsTimer *time.Timer
+	enableIPv6                    bool
 }
 
-// NewLWIPStack listens for any incoming connections/packets and registers
-// corresponding accept/recv callback functions.
-func NewLWIPStack(enableIPv6 bool) LWIPStack {
+const (
+	STOP    int32 = 0
+	RUNNING int32 = 1
+)
+
+func lwipStackSetupInternal(enableIPv6 bool) *lwipStack {
+	lwipMutex.Lock()
+	defer lwipMutex.Unlock()
 	var tcpPCB *C.struct_tcp_pcb
 	var udpPCB *C.struct_udp_pcb
 
@@ -88,6 +108,27 @@ func NewLWIPStack(enableIPv6 bool) LWIPStack {
 	}
 
 	setUDPRecvCallback(udpPCB, nil)
+	var run int32
+	stack := &lwipStack{
+		tpcb:       tcpPCB,
+		upcb:       udpPCB,
+		enableIPv6: enableIPv6,
+		IsRunning:  &run,
+	}
+	return stack
+}
+
+// NewLWIPStack listens for any incoming connections/packets and registers
+// corresponding accept/recv callback functions.
+// The timeout check goroutine is NOT started
+func NewLWIPStack(enableIPv6 bool) LWIPStack {
+	stack := lwipStackSetupInternal(enableIPv6)
+	atomic.StoreInt32(stack.IsRunning, RUNNING)
+	stack.StartTimeouts()
+	return stack
+}
+
+func (s *lwipStack) doStartTimeouts() {
 	task := runner.Go(func(shouldStop runner.S) error {
 		// do setup
 		// defer func(){
@@ -105,16 +146,85 @@ func NewLWIPStack(enableIPv6 bool) LWIPStack {
 				break
 			}
 		}
-		log.Printf("got sys_check_timeouts stop signal")
+		log.Infof("got sys_check_timeouts stop signal")
 		return zeroErr // any errors?
 	})
+	lwipSysCheckTimeoutsLock.Lock()
+	s.LWIPSysCheckTimeoutsTask = task
+	lwipSysCheckTimeoutsLock.Unlock()
+	log.Infof("sys_check_timeouts started")
+}
 
-	return &lwipStack{
-		tpcb:                     tcpPCB,
-		upcb:                     udpPCB,
-		lwipSysCheckTimeoutsTask: task,
-		enableIPv6:               enableIPv6,
+// StartTimeouts start the lwip stack timeout checking goroutine
+func (s *lwipStack) StartTimeouts() {
+	// only start the task when we are really in running state
+	if s.GetRunningStatus() {
+		// cancel scheduled stop timer
+		lwipSysCheckTimeoutsLock.Lock()
+		if s.LWIPSysStopCheckTimeoutsTimer != nil {
+			log.Infof("StartTimeouts: cancel scheduled stop timer Stop() before call")
+			if !s.LWIPSysStopCheckTimeoutsTimer.Stop() {
+				<-s.LWIPSysStopCheckTimeoutsTimer.C
+			}
+			s.LWIPSysStopCheckTimeoutsTimer.Reset(1)
+			log.Infof("StartTimeouts: cancel scheduled stop timer Stop() called")
+		}
+		lwipSysCheckTimeoutsLock.Unlock()
+		// never started or not running at the moment
+		if s.LWIPSysCheckTimeoutsTask == nil || !s.LWIPSysCheckTimeoutsTask.Running() {
+			s.doStartTimeouts()
+		}
 	}
+}
+
+// StopTimeouts stops the lwip stack when timeout
+// We should NOT stop it instantly, TCP stack relys on the timeout to destory
+// connections, we stop it only when we are in long-idle
+func (s *lwipStack) StopTimeouts(t LWIPSysCheckTimeoutsClosingType) {
+	if t == DELAY {
+		if s.LWIPSysCheckTimeoutsTask != nil && s.LWIPSysCheckTimeoutsTask.Running() {
+			log.Infof("StopTimeouts: schedule stop timer at %v", time.Now())
+			lwipSysCheckTimeoutsLock.Lock()
+			s.LWIPSysStopCheckTimeoutsTimer = time.NewTimer(30 * time.Minute)
+			lwipSysCheckTimeoutsLock.Unlock()
+
+			// stop when timeout expires
+			go func(s *lwipStack) {
+
+				t := <-s.LWIPSysStopCheckTimeoutsTimer.C
+				// if we are really in stop state then stop it
+				if !s.GetRunningStatus() {
+					log.Infof("StopTimeouts: scheduled stop timer expires at %v with stopped lwipStack", t)
+					s.LWIPSysCheckTimeoutsTask.Stop()
+				} else {
+					log.Infof("StopTimeouts: scheduled stop timer expires at %v with running lwipStack", t)
+				}
+
+			}(s)
+		}
+	} else if t == INSTANT {
+		// cancel scheduled stop timer
+		lwipSysCheckTimeoutsLock.Lock()
+		if s.LWIPSysStopCheckTimeoutsTimer != nil {
+			log.Infof("StopTimeouts: cancel scheduled stop timer Stop() before call")
+			if !s.LWIPSysStopCheckTimeoutsTimer.Stop() {
+				<-s.LWIPSysStopCheckTimeoutsTimer.C
+			}
+			s.LWIPSysStopCheckTimeoutsTimer.Reset(1)
+			log.Infof("StopTimeouts: cancel scheduled stop timer Stop() called")
+		}
+		lwipSysCheckTimeoutsLock.Unlock()
+		// and finally one shot kill
+		log.Infof("StopTimeouts: stop LWIPSysCheckTimeoutsTask instantly")
+		s.LWIPSysCheckTimeoutsTask.Stop()
+	}
+
+}
+
+// GetRunningStatus returns true if the lwip stack is running
+func (s *lwipStack) GetRunningStatus() bool {
+	r := atomic.LoadInt32(s.IsRunning)
+	return r == RUNNING
 }
 
 func (s *lwipStack) Write(data []byte) (int, error) {
@@ -125,15 +235,9 @@ func (s *lwipStack) RestartTimeouts() {
 	C.sys_restart_timeouts()
 }
 
-func (s *lwipStack) Close() error {
-	tcpConns.Range(func(_, c interface{}) bool {
-		c.(*tcpConn).Abort()
-		return true
-	})
-	udpConns.Range(func(_, c interface{}) bool {
-		c.(*udpConn).Close()
-		return true
-	})
+func (s *lwipStack) closeInternal() {
+	lwipMutex.Lock()
+	defer lwipMutex.Unlock()
 
 	// free TCP listener pcb
 	err := C.tcp_close(s.tpcb)
@@ -152,10 +256,25 @@ func (s *lwipStack) Close() error {
 
 	// free UDP pcb
 	C.udp_remove(s.upcb)
-	if s.lwipSysCheckTimeoutsTask.Running() {
-		s.lwipSysCheckTimeoutsTask.Stop()
-		<-s.lwipSysCheckTimeoutsTask.StopChan()
+}
+
+func (s *lwipStack) Close(t LWIPSysCheckTimeoutsClosingType) error {
+	if s.GetRunningStatus() {
+		tcpConns.Range(func(_, c interface{}) bool {
+			c.(*tcpConn).Abort()
+			return true
+		})
+		udpConns.Range(func(_, c interface{}) bool {
+			c.(*udpConn).Close()
+			return true
+		})
+
+		s.closeInternal()
+
+		atomic.StoreInt32(s.IsRunning, STOP)
 	}
+
+	s.StopTimeouts(t)
 
 	return nil
 }
