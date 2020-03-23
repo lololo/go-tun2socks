@@ -240,22 +240,27 @@ func (conn *tcpConn) Read(data []byte) (int, error) {
 // again another time. By calling this function, the lwIP thread is assumed to be already
 // locked by the caller.
 func (conn *tcpConn) writeInternal(data []byte) (int, error) {
+	lwipMutex.Lock()
 	err := C.tcp_write(conn.pcb, unsafe.Pointer(&data[0]), C.u16_t(len(data)), C.TCP_WRITE_FLAG_COPY)
 	if err == C.ERR_OK {
+		lwipMutex.Unlock()
 		return len(data), nil
 	} else if err == C.ERR_MEM {
+		lwipMutex.Unlock()
 		return 0, nil
 	}
+	lwipMutex.Unlock()
 	return 0, fmt.Errorf("tcp_write failed (%v)", int(err))
 }
 
 func (conn *tcpConn) tcpOutputInternal() error {
 	lwipMutex.Lock()
-	defer lwipMutex.Unlock()
 	err := C.tcp_output(conn.pcb)
 	if err != C.ERR_OK {
+		lwipMutex.Unlock()
 		return fmt.Errorf("tcp_output failed (%v)", int(err))
 	}
+	lwipMutex.Unlock()
 	return nil
 
 }
@@ -295,9 +300,12 @@ func (conn *tcpConn) Write(data []byte) (int, error) {
 			return totalWritten, err
 		}
 
-		lwipMutex.Lock()
 		toWrite := len(data)
+
+		lwipMutex.Lock()
 		sendBufLen := C.tcp_sndbuf_cgo(conn.pcb)
+		lwipMutex.Unlock()
+
 		if toWrite > int(sendBufLen) {
 			// Write at most the size of the LWIP buffer.
 			toWrite = int(sendBufLen)
@@ -305,13 +313,11 @@ func (conn *tcpConn) Write(data []byte) (int, error) {
 		if toWrite > 0 {
 			written, err := conn.writeInternal(data[0:toWrite])
 			if err != nil {
-				lwipMutex.Unlock()
 				return totalWritten, err
 			}
 			totalWritten += written
 			data = data[written:len(data)]
 		}
-		lwipMutex.Unlock()
 	}
 
 	err := conn.tcpOutputInternal()
@@ -353,31 +359,37 @@ func (conn *tcpConn) Sent(len uint16) error {
 
 func (conn *tcpConn) checkClosing() error {
 	conn.Lock()
-	defer conn.Unlock()
 
 	if conn.state == tcpClosing {
+		conn.Unlock()
+
+		conn.release()
 		conn.closeInternal()
 		return NewLWIPError(LWIP_ERR_OK)
 	}
+	conn.Unlock()
 	return nil
 }
 
 func (conn *tcpConn) checkAborting() error {
 	conn.Lock()
-	defer conn.Unlock()
 
 	if conn.state == tcpAborting {
+		conn.Unlock()
+
+		conn.release()
 		conn.abortInternal()
 		return NewLWIPError(LWIP_ERR_ABRT)
 	}
+	conn.Unlock()
 	return nil
 }
 
 func (conn *tcpConn) isClosed() bool {
 	conn.Lock()
-	defer conn.Unlock()
-
-	return conn.state == tcpClosed
+	ret := conn.state == tcpClosed
+	conn.Unlock()
+	return ret
 }
 
 func (conn *tcpConn) checkState() error {
@@ -441,8 +453,6 @@ func (conn *tcpConn) closeInternal() error {
 	C.tcp_err(conn.pcb, nil)
 	C.tcp_poll(conn.pcb, nil, 0)
 
-	conn.release()
-
 	// FIXME Handle error.
 	err := C.tcp_close(conn.pcb)
 	switch err {
@@ -467,23 +477,22 @@ func (conn *tcpConn) closeInternal() error {
 // Never call this function outside of the lwIP thread since it calls
 // tcp_abort() and in that case we must return ERR_ABRT to lwIP.
 func (conn *tcpConn) abortInternal() {
-	conn.release()
 	C.tcp_abort(conn.pcb)
 }
 
 func (conn *tcpConn) Abort() {
 	conn.Lock()
-	defer conn.Unlock()
-
 	conn.state = tcpAborting
+	conn.Unlock()
 }
 
 func (conn *tcpConn) Err(err error) {
 	conn.Lock()
-	defer conn.Unlock()
+	conn.state = tcpErrored
+	conn.Unlock()
 
 	conn.release()
-	conn.state = tcpErrored
+
 }
 
 func (conn *tcpConn) LocalClosed() error {
@@ -492,11 +501,13 @@ func (conn *tcpConn) LocalClosed() error {
 }
 
 func (conn *tcpConn) release() {
+
 	GoPointerUnref(conn.connKey)
 
 	conn.sndPipeWriter.Close()
 	conn.sndPipeReader.Close()
 	conn.state = tcpClosed
+
 }
 
 func (conn *tcpConn) Poll() error {

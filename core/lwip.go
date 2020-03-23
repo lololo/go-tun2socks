@@ -37,9 +37,6 @@ type LWIPStack interface {
 	StopTimeouts(LWIPSysCheckTimeoutsClosingType)
 }
 
-// lwIP runs in a single thread, locking is needed in Go runtime.
-var lwipMutex = &sync.Mutex{}
-
 var lwipSysCheckTimeoutsLock = &sync.Mutex{}
 
 type lwipStack struct {
@@ -58,7 +55,7 @@ const (
 
 func lwipStackSetupInternal(enableIPv6 bool) *lwipStack {
 	lwipMutex.Lock()
-	defer lwipMutex.Unlock()
+
 	var tcpPCB *C.struct_tcp_pcb
 	var udpPCB *C.struct_udp_pcb
 
@@ -69,7 +66,8 @@ func lwipStackSetupInternal(enableIPv6 bool) *lwipStack {
 	}
 
 	if tcpPCB == nil {
-		panic("tcp_new return nil")
+		lwipMutex.Unlock()
+		log.Fatalf("tcp_new return nil")
 	}
 
 	err := C.tcp_bind(tcpPCB, C.IP_ADDR_ANY, 0)
@@ -78,17 +76,21 @@ func lwipStackSetupInternal(enableIPv6 bool) *lwipStack {
 	case C.ERR_OK:
 		break
 	case C.ERR_VAL:
-		panic("invalid PCB state")
+		lwipMutex.Unlock()
+		log.Fatalf("invalid PCB state")
 	case C.ERR_USE:
-		panic("port in use")
+		lwipMutex.Unlock()
+		log.Fatalf("port in use")
 	default:
 		C.memp_free(C.MEMP_TCP_PCB, unsafe.Pointer(tcpPCB))
-		panic("unknown tcp_bind return value")
+		lwipMutex.Unlock()
+		log.Fatalf("unknown tcp_bind return value")
 	}
 
 	tcpPCB = C.tcp_listen_with_backlog(tcpPCB, C.TCP_DEFAULT_LISTEN_BACKLOG)
 	if tcpPCB == nil {
-		panic("can not allocate tcp pcb")
+		lwipMutex.Unlock()
+		log.Fatalf("can not allocate tcp pcb")
 	}
 
 	setTCPAcceptCallback(tcpPCB)
@@ -99,12 +101,14 @@ func lwipStackSetupInternal(enableIPv6 bool) *lwipStack {
 		udpPCB = C.udp_new_ip_type(C.IPADDR_TYPE_V4)
 	}
 	if udpPCB == nil {
-		panic("could not allocate udp pcb")
+		lwipMutex.Unlock()
+		log.Fatalf("could not allocate udp pcb")
 	}
 
 	err = C.udp_bind(udpPCB, C.IP_ADDR_ANY, 0)
 	if err != C.ERR_OK {
-		panic("address already in use")
+		lwipMutex.Unlock()
+		log.Fatalf("address already in use")
 	}
 
 	setUDPRecvCallback(udpPCB, nil)
@@ -115,6 +119,7 @@ func lwipStackSetupInternal(enableIPv6 bool) *lwipStack {
 		enableIPv6: enableIPv6,
 		IsRunning:  &run,
 	}
+	lwipMutex.Unlock()
 	return stack
 }
 
@@ -199,6 +204,10 @@ func (s *lwipStack) StopTimeouts(t LWIPSysCheckTimeoutsClosingType) {
 				} else {
 					log.Infof("StopTimeouts: scheduled stop timer expires at %v with running lwipStack", t)
 				}
+				// destory timer when expires
+				lwipSysCheckTimeoutsLock.Lock()
+				s.LWIPSysStopCheckTimeoutsTimer = nil
+				lwipSysCheckTimeoutsLock.Unlock()
 
 			}(s)
 		}
@@ -245,9 +254,6 @@ func (s *lwipStack) closeInternal() {
 	case C.ERR_OK:
 		// ERR_OK if connection has been closed
 		break
-	case C.ERR_ARG:
-		// invalid pointer or state
-		panic("listen tpcb is invalid")
 	default:
 		// another err_t if closing failed and pcb is not freed
 		// make sure free is invoked
