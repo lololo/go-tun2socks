@@ -49,11 +49,11 @@ func tcpRecvFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, p *C.struct_pbuf, pas
 	// Only free the pbuf when returning ERR_OK or ERR_ABRT,
 	// otherwise must not free the pbuf.
 	shouldFreePbuf := false
-	defer func() {
-		if p != nil && shouldFreePbuf {
-			C.pbuf_free(p)
+	defer func(pb *C.struct_pbuf, shouldFreePbuf *bool) {
+		if pb != nil && *shouldFreePbuf {
+			C.pbuf_free(pb)
 		}
-	}()
+	}(p, &shouldFreePbuf)
 
 	if passedInErr != C.ERR_OK && passedInErr != C.ERR_ABRT {
 		// TODO: unknown err passed in, not sure if it's correct

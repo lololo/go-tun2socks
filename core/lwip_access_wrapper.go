@@ -15,7 +15,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"unsafe"
-
 	//"github.com/eycorsican/go-tun2socks/common/log"
 )
 
@@ -32,7 +31,7 @@ type MutexWrapper struct {
 
 // pass anything to disable log trace
 // pass nothing to enable log trace
-func (m *MutexWrapper) Lock(/*params ...bool*/) {
+func (m *MutexWrapper) Lock( /*params ...bool*/ ) {
 	/*if len(params) != 0 {
 		m.lock.Lock()
 		atomic.AddInt32(&m.count, 1)
@@ -53,7 +52,7 @@ func (m *MutexWrapper) Lock(/*params ...bool*/) {
 
 // pass anything to disable log trace
 // pass nothing to enable log trace
-func (m *MutexWrapper) Unlock(/*params ...bool*/) {
+func (m *MutexWrapper) Unlock( /*params ...bool*/ ) {
 	/*if len(params) != 0 {
 		m.lock.Unlock()
 		atomic.AddInt32(&m.count, -1)

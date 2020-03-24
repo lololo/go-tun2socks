@@ -15,7 +15,6 @@ import "C"
 import (
 	"encoding/binary"
 	"errors"
-	"log"
 	"unsafe"
 )
 
@@ -95,6 +94,7 @@ func Input(pkt []byte) (int, error) {
 	defer lwipMutex.Unlock()
 
 	var buf *C.struct_pbuf
+	var ierr C.err_t
 
 	// TODO Copy the data only when lwip need to keep it, e.g. in
 	// case we are returning ERR_CONN in tcpRecvFn.
@@ -107,17 +107,18 @@ func Input(pkt []byte) (int, error) {
 	// you are unable to receive TCP acks!
 
 	buf = C.pbuf_alloc(C.PBUF_RAW, C.u16_t(pktLen), C.PBUF_POOL)
+	defer func(pb *C.struct_pbuf, err *C.err_t) {
+		if pb != nil && *err != C.ERR_OK {
+			C.pbuf_free(pb)
+		}
+	}(buf, &ierr)
 	if buf == nil {
 		return 0, errors.New("lwip Input() pbuf_alloc returns NULL")
 	}
 	C.pbuf_take(buf, unsafe.Pointer(&pkt[0]), C.u16_t(pktLen))
 
-	ierr := C.input(buf)
+	ierr = C.input(buf)
 	if ierr != C.ERR_OK {
-		if buf != nil {
-			C.pbuf_free(buf)
-		}
-		log.Printf("lwip Input() input error code %v", ierr)
 		return 0, errors.New("packet not handled")
 	}
 	return pktLen, nil

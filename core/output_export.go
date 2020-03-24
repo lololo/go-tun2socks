@@ -21,9 +21,9 @@ func output(p *C.struct_pbuf) C.err_t {
 		OutputFn(buf[:totlen])
 	} else {
 		buf := pool.NewBytes(totlen)
+		defer pool.FreeBytes(buf)
 		C.pbuf_copy_partial(p, unsafe.Pointer(&buf[0]), p.tot_len, 0) // data copy here!
 		OutputFn(buf[:totlen])
-		pool.FreeBytes(buf)
 	}
 	return C.ERR_OK
 }

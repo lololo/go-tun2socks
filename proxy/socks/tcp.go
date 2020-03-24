@@ -68,8 +68,8 @@ func relayGenerator(h *tcpHandler, src, dst net.Conn, dir direction, closeOnce *
 	go func(src, dst net.Conn, dir direction, stopChan chan bool) {
 		var err error
 		buf := pool.NewBytes(pool.BufSize)
+		defer pool.FreeBytes(buf)
 		_, err = io.CopyBuffer(dst, src, buf)
-		pool.FreeBytes(buf)
 		relayClose(src, dst, err, closeOnce)
 		close(stopChan) // send uplink finished signal
 	}(src, dst, dir, stopSig)

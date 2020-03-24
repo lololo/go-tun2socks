@@ -149,14 +149,17 @@ func (conn *udpConn) WriteFrom(data []byte, addr *net.UDPAddr) (int, error) {
 
 	// Why this way? Please check lwip/core/dns.c
 	buf := C.pbuf_alloc(C.PBUF_TRANSPORT, C.u16_t(dataLen), C.PBUF_RAM)
+	defer func(pb *C.struct_pbuf) {
+		if pb != nil {
+			C.pbuf_free(pb)
+		}
+	}(buf)
 	if buf == nil {
 		return 0, errors.New("udpConn WriteFrom pbuf_alloc returns NULL")
 	}
 	C.pbuf_take(buf, unsafe.Pointer(&data[0]), C.u16_t(dataLen))
 	C.udp_sendto(conn.pcb, buf, &conn.localIP, conn.localPort, &cremoteIP, C.u16_t(addr.Port))
-	if buf != nil {
-		C.pbuf_free(buf)
-	}
+
 	return dataLen, nil
 }
 

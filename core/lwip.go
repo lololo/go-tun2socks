@@ -142,9 +142,9 @@ func (s *lwipStack) doStartTimeouts() {
 		zeroErr := errors.New("no error")
 		for {
 			// do some work
-			lwipMutex.Lock(/*true*/) // pass anything to disable log trace
+			lwipMutex.Lock( /*true*/ ) // pass anything to disable log trace
 			C.sys_check_timeouts()
-			lwipMutex.Unlock(/*true*/)
+			lwipMutex.Unlock( /*true*/ )
 
 			time.Sleep(CHECK_TIMEOUTS_INTERVAL * time.Millisecond)
 			if shouldStop() {
