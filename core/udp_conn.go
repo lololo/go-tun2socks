@@ -141,6 +141,9 @@ func (conn *udpConn) WriteFrom(data []byte, addr *net.UDPAddr) (int, error) {
 		return 0, err
 	}
 	dataLen := len(data)
+	remaining := dataLen
+	startPos := 0
+	singleCopyLen := 0
 	// PBUF_TRANSPORT  Includes spare room for transport layer header, e.g. UDP header. Use this if you intend to pass the pbuf to functions like udp_send().
 
 	// PBUF_RAM  pbuf data is stored in RAM, used for TX mostly, struct pbuf and its payload are allocated in one piece of contiguous memory
@@ -157,7 +160,19 @@ func (conn *udpConn) WriteFrom(data []byte, addr *net.UDPAddr) (int, error) {
 	if buf == nil {
 		return 0, errors.New("udpConn WriteFrom pbuf_alloc returns NULL")
 	}
-	C.pbuf_take(buf, unsafe.Pointer(&data[0]), C.u16_t(dataLen))
+	for remaining > 0 {
+		if remaining > int(buf.tot_len) {
+			singleCopyLen = int(buf.tot_len)
+		} else {
+			singleCopyLen = remaining
+		}
+		r := C.pbuf_take_at(buf, unsafe.Pointer(&data[startPos]), C.u16_t(singleCopyLen), C.u16_t(startPos))
+		if r == C.ERR_MEM {
+			panic("udpConn WriteFrom pbuf_take_at this should not happen")
+		}
+		startPos += singleCopyLen
+		remaining -= singleCopyLen
+	}
 	C.udp_sendto(conn.pcb, buf, &conn.localIP, conn.localPort, &cremoteIP, C.u16_t(addr.Port))
 
 	return dataLen, nil

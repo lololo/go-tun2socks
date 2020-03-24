@@ -89,6 +89,9 @@ func Input(pkt []byte) (int, error) {
 	if pktLen == 0 {
 		return 0, nil
 	}
+	remaining := pktLen
+	startPos := 0
+	singleCopyLen := 0
 
 	lwipMutex.Lock()
 	defer lwipMutex.Unlock()
@@ -115,7 +118,19 @@ func Input(pkt []byte) (int, error) {
 	if buf == nil {
 		return 0, errors.New("lwip Input() pbuf_alloc returns NULL")
 	}
-	C.pbuf_take(buf, unsafe.Pointer(&pkt[0]), C.u16_t(pktLen))
+	for remaining > 0 {
+		if remaining > int(buf.tot_len) {
+			singleCopyLen = int(buf.tot_len)
+		} else {
+			singleCopyLen = remaining
+		}
+		r := C.pbuf_take_at(buf, unsafe.Pointer(&pkt[startPos]), C.u16_t(singleCopyLen), C.u16_t(startPos))
+		if r == C.ERR_MEM {
+			panic("Input pbuf_take_at this should not happen")
+		}
+		startPos += singleCopyLen
+		remaining -= singleCopyLen
+	}
 
 	ierr = C.input(buf)
 	if ierr != C.ERR_OK {
