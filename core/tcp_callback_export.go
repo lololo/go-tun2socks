@@ -52,6 +52,8 @@ func tcpRecvFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, p *C.struct_pbuf, pas
 	defer lwipMutex.Unlock()
 	shouldFreePbuf := false
 	defer func(pb *C.struct_pbuf, shouldFreePbuf *bool) {
+		lwipMutex.Lock()
+		defer lwipMutex.Unlock()
 		if pb != nil && *shouldFreePbuf {
 			C.pbuf_free(pb)
 			pb = nil

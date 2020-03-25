@@ -19,6 +19,8 @@ func udpRecvFn(arg unsafe.Pointer, pcb *C.struct_udp_pcb, p *C.struct_pbuf, addr
 	lwipMutex.Lock()
 	defer lwipMutex.Unlock()
 	defer func(pb *C.struct_pbuf) {
+		lwipMutex.Lock()
+		defer lwipMutex.Unlock()
 		if pb != nil {
 			C.pbuf_free(pb)
 			pb = nil

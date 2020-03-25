@@ -157,6 +157,8 @@ func (conn *udpConn) WriteFrom(data []byte, addr *net.UDPAddr) (int, error) {
 	// Why this way? Please check lwip/core/dns.c
 	buf := C.pbuf_alloc(C.PBUF_TRANSPORT, C.u16_t(dataLen), C.PBUF_RAM)
 	defer func(pb *C.struct_pbuf) {
+		lwipMutex.Lock()
+		defer lwipMutex.Unlock()
 		if pb != nil {
 			C.pbuf_free(pb)
 			pb = nil

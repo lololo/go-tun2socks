@@ -111,6 +111,8 @@ func Input(pkt []byte) (int, error) {
 	buf = C.pbuf_alloc(C.PBUF_RAW, C.u16_t(pktLen), C.PBUF_POOL)
 	defer func(pb *C.struct_pbuf, err *C.err_t) {
 		if pb != nil && *err != C.ERR_OK {
+			lwipMutex.Lock()
+			defer lwipMutex.Unlock()
 			C.pbuf_free(pb)
 			pb = nil
 		}
