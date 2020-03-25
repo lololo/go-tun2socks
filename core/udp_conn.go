@@ -141,6 +141,9 @@ func (conn *udpConn) WriteFrom(data []byte, addr *net.UDPAddr) (int, error) {
 		return 0, err
 	}
 	dataLen := len(data)
+	if dataLen <= 0 {
+		return dataLen, nil
+	}
 	remaining := dataLen
 	startPos := 0
 	singleCopyLen := 0
@@ -158,7 +161,7 @@ func (conn *udpConn) WriteFrom(data []byte, addr *net.UDPAddr) (int, error) {
 		}
 	}(buf)
 	if buf == nil {
-		return 0, errors.New("udpConn WriteFrom pbuf_alloc returns NULL")
+		panic("udpConn WriteFrom pbuf_alloc returns NULL")
 	}
 	for remaining > 0 {
 		if remaining > int(buf.tot_len) {
@@ -166,6 +169,7 @@ func (conn *udpConn) WriteFrom(data []byte, addr *net.UDPAddr) (int, error) {
 		} else {
 			singleCopyLen = remaining
 		}
+		log.Printf("udpConn WriteFrom remaining: %v, tot_len %v singleCopyLen : %v", remaining, int(buf.tot_len), singleCopyLen)
 		r := C.pbuf_take_at(buf, unsafe.Pointer(&data[startPos]), C.u16_t(singleCopyLen), C.u16_t(startPos))
 		if r == C.ERR_MEM {
 			panic("udpConn WriteFrom pbuf_take_at this should not happen")
