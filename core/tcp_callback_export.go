@@ -48,6 +48,8 @@ func tcpAcceptFn(arg unsafe.Pointer, newpcb *C.struct_tcp_pcb, err C.err_t) C.er
 func tcpRecvFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, p *C.struct_pbuf, passedInErr C.err_t) C.err_t {
 	// Only free the pbuf when returning ERR_OK or ERR_ABRT,
 	// otherwise must not free the pbuf.
+	lwipMutex.Lock()
+	defer lwipMutex.Unlock()
 	shouldFreePbuf := false
 	defer func(pb *C.struct_pbuf, shouldFreePbuf *bool) {
 		if pb != nil && *shouldFreePbuf {
@@ -137,6 +139,8 @@ func tcpSentFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, len C.u16_t) C.err_t 
 			panic("unexpected error")
 		}
 	} else {
+		lwipMutex.Lock()
+		defer lwipMutex.Unlock()
 		C.tcp_abort(tpcb)
 		return C.ERR_ABRT
 	}
@@ -171,6 +175,8 @@ func tcpPollFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb) C.err_t {
 			panic("unexpected error")
 		}
 	} else {
+		lwipMutex.Lock()
+		defer lwipMutex.Unlock()
 		C.tcp_abort(tpcb)
 		return C.ERR_ABRT
 	}

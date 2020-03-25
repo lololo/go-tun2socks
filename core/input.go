@@ -85,6 +85,8 @@ func peekNextProto(ipv ipver, p []byte) (proto, error) {
 }
 
 func Input(pkt []byte) (int, error) {
+	lwipMutex.Lock()
+	defer lwipMutex.Unlock()
 	pktLen := len(pkt)
 	if pktLen == 0 {
 		return 0, nil
@@ -92,9 +94,6 @@ func Input(pkt []byte) (int, error) {
 	remaining := pktLen
 	startPos := 0
 	singleCopyLen := 0
-
-	lwipMutex.Lock()
-	defer lwipMutex.Unlock()
 
 	var buf *C.struct_pbuf
 	var ierr C.err_t

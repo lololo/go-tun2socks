@@ -16,13 +16,11 @@ import (
 	"sync/atomic"
 	"unsafe"
 	//"github.com/eycorsican/go-tun2socks/common/log"
+	syncex "github.com/eycorsican/go-tun2socks/component/go-syncex"
 )
 
 // lwIP runs in a single thread, locking is needed in Go runtime.
-var lwipMutex = &MutexWrapper{
-	lock:  &sync.Mutex{},
-	count: 0,
-}
+var lwipMutex = &syncex.RecursiveMutex{}
 
 type MutexWrapper struct {
 	lock  *sync.Mutex
@@ -75,11 +73,15 @@ func (m *MutexWrapper) Unlock( /*params ...bool*/ ) {
 // reentrants are not allowed, caller is required to lock lwipMutex.
 //export ipAddrNTOA
 func ipAddrNTOA(ipaddr C.struct_ip_addr) string {
+	lwipMutex.Lock()
+	defer lwipMutex.Unlock()
 	return C.GoString(C.ipaddr_ntoa(&ipaddr))
 }
 
 //export ipAddrATON
 func ipAddrATON(cp string, addr *C.struct_ip_addr) error {
+	lwipMutex.Lock()
+	defer lwipMutex.Unlock()
 	ccp := C.CString(cp)
 	defer C.free(unsafe.Pointer(ccp))
 	if r := C.ipaddr_aton(ccp, addr); r == 0 {

@@ -9,12 +9,12 @@ package core
 import "C"
 import (
 	"errors"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
 
 	"github.com/eycorsican/go-tun2socks/common/log"
+	syncex "github.com/eycorsican/go-tun2socks/component/go-syncex"
 	"github.com/eycorsican/go-tun2socks/component/runner"
 )
 
@@ -37,7 +37,7 @@ type LWIPStack interface {
 	StopTimeouts(LWIPSysCheckTimeoutsClosingType)
 }
 
-var lwipSysCheckTimeoutsLock = &sync.Mutex{}
+var lwipSysCheckTimeoutsLock = &syncex.RecursiveMutex{}
 
 type lwipStack struct {
 	IsRunning                     *int32
@@ -55,7 +55,7 @@ const (
 
 func lwipStackSetupInternal(enableIPv6 bool) *lwipStack {
 	lwipMutex.Lock()
-
+	defer lwipMutex.Unlock()
 	var tcpPCB *C.struct_tcp_pcb
 	var udpPCB *C.struct_udp_pcb
 
@@ -66,7 +66,6 @@ func lwipStackSetupInternal(enableIPv6 bool) *lwipStack {
 	}
 
 	if tcpPCB == nil {
-		lwipMutex.Unlock()
 		log.Fatalf("tcp_new return nil")
 	}
 
@@ -76,20 +75,16 @@ func lwipStackSetupInternal(enableIPv6 bool) *lwipStack {
 	case C.ERR_OK:
 		break
 	case C.ERR_VAL:
-		lwipMutex.Unlock()
 		log.Fatalf("invalid PCB state")
 	case C.ERR_USE:
-		lwipMutex.Unlock()
 		log.Fatalf("port in use")
 	default:
 		C.memp_free(C.MEMP_TCP_PCB, unsafe.Pointer(tcpPCB))
-		lwipMutex.Unlock()
 		log.Fatalf("unknown tcp_bind return value")
 	}
 
 	tcpPCB = C.tcp_listen_with_backlog(tcpPCB, C.TCP_DEFAULT_LISTEN_BACKLOG)
 	if tcpPCB == nil {
-		lwipMutex.Unlock()
 		log.Fatalf("can not allocate tcp pcb")
 	}
 
@@ -101,13 +96,11 @@ func lwipStackSetupInternal(enableIPv6 bool) *lwipStack {
 		udpPCB = C.udp_new_ip_type(C.IPADDR_TYPE_V4)
 	}
 	if udpPCB == nil {
-		lwipMutex.Unlock()
 		log.Fatalf("could not allocate udp pcb")
 	}
 
 	err = C.udp_bind(udpPCB, C.IP_ADDR_ANY, 0)
 	if err != C.ERR_OK {
-		lwipMutex.Unlock()
 		log.Fatalf("address already in use")
 	}
 
@@ -119,7 +112,6 @@ func lwipStackSetupInternal(enableIPv6 bool) *lwipStack {
 		enableIPv6: enableIPv6,
 		IsRunning:  &run,
 	}
-	lwipMutex.Unlock()
 	return stack
 }
 
@@ -155,8 +147,8 @@ func (s *lwipStack) doStartTimeouts() {
 		return zeroErr // any errors?
 	})
 	lwipSysCheckTimeoutsLock.Lock()
+	defer lwipSysCheckTimeoutsLock.Unlock()
 	s.LWIPSysCheckTimeoutsTask = task
-	lwipSysCheckTimeoutsLock.Unlock()
 	log.Infof("sys_check_timeouts started")
 }
 
@@ -166,6 +158,7 @@ func (s *lwipStack) StartTimeouts() {
 	if s.GetRunningStatus() {
 		// cancel scheduled stop timer
 		lwipSysCheckTimeoutsLock.Lock()
+		defer lwipSysCheckTimeoutsLock.Unlock()
 		if s.LWIPSysStopCheckTimeoutsTimer != nil {
 			log.Infof("StartTimeouts: cancel scheduled stop timer Stop() before call")
 			if !s.LWIPSysStopCheckTimeoutsTimer.Stop() {
@@ -174,7 +167,7 @@ func (s *lwipStack) StartTimeouts() {
 			s.LWIPSysStopCheckTimeoutsTimer.Reset(1)
 			log.Infof("StartTimeouts: cancel scheduled stop timer Stop() called")
 		}
-		lwipSysCheckTimeoutsLock.Unlock()
+
 		// never started or not running at the moment
 		if s.LWIPSysCheckTimeoutsTask == nil || !s.LWIPSysCheckTimeoutsTask.Running() {
 			s.doStartTimeouts()
@@ -190,8 +183,8 @@ func (s *lwipStack) StopTimeouts(t LWIPSysCheckTimeoutsClosingType) {
 		if s.LWIPSysCheckTimeoutsTask != nil && s.LWIPSysCheckTimeoutsTask.Running() {
 			log.Infof("StopTimeouts: schedule stop timer at %v", time.Now())
 			lwipSysCheckTimeoutsLock.Lock()
+			defer lwipSysCheckTimeoutsLock.Unlock()
 			s.LWIPSysStopCheckTimeoutsTimer = time.NewTimer(30 * time.Minute)
-			lwipSysCheckTimeoutsLock.Unlock()
 
 			// stop when timeout expires
 			go func(s *lwipStack) {
@@ -206,14 +199,14 @@ func (s *lwipStack) StopTimeouts(t LWIPSysCheckTimeoutsClosingType) {
 				}
 				// destory timer when expires
 				lwipSysCheckTimeoutsLock.Lock()
+				defer lwipSysCheckTimeoutsLock.Unlock()
 				s.LWIPSysStopCheckTimeoutsTimer = nil
-				lwipSysCheckTimeoutsLock.Unlock()
-
 			}(s)
 		}
 	} else if t == INSTANT {
 		// cancel scheduled stop timer
 		lwipSysCheckTimeoutsLock.Lock()
+		defer lwipSysCheckTimeoutsLock.Unlock()
 		if s.LWIPSysStopCheckTimeoutsTimer != nil {
 			log.Infof("StopTimeouts: cancel scheduled stop timer Stop() before call")
 			if !s.LWIPSysStopCheckTimeoutsTimer.Stop() {
@@ -222,7 +215,7 @@ func (s *lwipStack) StopTimeouts(t LWIPSysCheckTimeoutsClosingType) {
 			s.LWIPSysStopCheckTimeoutsTimer.Reset(1)
 			log.Infof("StopTimeouts: cancel scheduled stop timer Stop() called")
 		}
-		lwipSysCheckTimeoutsLock.Unlock()
+
 		// and finally one shot kill
 		log.Infof("StopTimeouts: stop LWIPSysCheckTimeoutsTask instantly")
 		s.LWIPSysCheckTimeoutsTask.Stop()

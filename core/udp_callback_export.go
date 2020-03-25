@@ -16,6 +16,8 @@ func udpRecvFn(arg unsafe.Pointer, pcb *C.struct_udp_pcb, p *C.struct_pbuf, addr
 	// XXX:  * ATTENTION: Be aware that 'addr' might point into the pbuf 'p' so freeing this pbuf
 	//       *            can make 'addr' invalid, too.
 	// Let's copy addr in case accessing invalid pointer
+	lwipMutex.Lock()
+	defer lwipMutex.Unlock()
 	defer func(pb *C.struct_pbuf) {
 		if pb != nil {
 			C.pbuf_free(pb)

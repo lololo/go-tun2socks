@@ -92,6 +92,8 @@ type tcpConn struct {
 }
 
 func newTCPConn(pcb *C.struct_tcp_pcb, handler TCPConnHandler) (TCPConn, error) {
+	lwipMutex.Lock()
+	defer lwipMutex.Unlock()
 	// From badvpn-tun2socks
 	C.tcp_nagle_disable_cgo(pcb)
 	C.tcp_keepalive_settings_cgo(pcb)
@@ -127,6 +129,8 @@ func newTCPConn(pcb *C.struct_tcp_pcb, handler TCPConnHandler) (TCPConn, error) 
 	conn.state = tcpConnecting
 	conn.Unlock()
 	go func() {
+		lwipMutex.Lock()
+		defer lwipMutex.Unlock()
 		err := handler.Handle(TCPConn(conn), conn.remoteAddr)
 		if err != nil {
 			conn.Abort()
@@ -447,6 +451,8 @@ func (conn *tcpConn) setLocalClosed() error {
 
 // Never call this function outside of the lwIP thread.
 func (conn *tcpConn) closeInternal() error {
+	lwipMutex.Lock()
+	defer lwipMutex.Unlock()
 	C.tcp_arg(conn.pcb, nil)
 	C.tcp_recv(conn.pcb, nil)
 	C.tcp_sent(conn.pcb, nil)
@@ -477,6 +483,8 @@ func (conn *tcpConn) closeInternal() error {
 // Never call this function outside of the lwIP thread since it calls
 // tcp_abort() and in that case we must return ERR_ABRT to lwIP.
 func (conn *tcpConn) abortInternal() {
+	lwipMutex.Lock()
+	defer lwipMutex.Unlock()
 	C.tcp_abort(conn.pcb)
 }
 
@@ -501,6 +509,8 @@ func (conn *tcpConn) LocalClosed() error {
 }
 
 func (conn *tcpConn) release() {
+	lwipMutex.Lock()
+	defer lwipMutex.Unlock()
 
 	GoPointerUnref(conn.connKey)
 
