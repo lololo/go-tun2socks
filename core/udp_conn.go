@@ -158,6 +158,7 @@ func (conn *udpConn) WriteFrom(data []byte, addr *net.UDPAddr) (int, error) {
 	defer func(pb *C.struct_pbuf) {
 		if pb != nil {
 			C.pbuf_free(pb)
+			pb = nil
 		}
 	}(buf)
 	if buf == nil {

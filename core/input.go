@@ -113,6 +113,7 @@ func Input(pkt []byte) (int, error) {
 	defer func(pb *C.struct_pbuf, err *C.err_t) {
 		if pb != nil && *err != C.ERR_OK {
 			C.pbuf_free(pb)
+			pb = nil
 		}
 	}(buf, &ierr)
 	if buf == nil {

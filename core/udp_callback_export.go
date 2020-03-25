@@ -19,6 +19,7 @@ func udpRecvFn(arg unsafe.Pointer, pcb *C.struct_udp_pcb, p *C.struct_pbuf, addr
 	defer func(pb *C.struct_pbuf) {
 		if pb != nil {
 			C.pbuf_free(pb)
+			pb = nil
 		}
 	}(p)
 

@@ -52,6 +52,7 @@ func tcpRecvFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, p *C.struct_pbuf, pas
 	defer func(pb *C.struct_pbuf, shouldFreePbuf *bool) {
 		if pb != nil && *shouldFreePbuf {
 			C.pbuf_free(pb)
+			pb = nil
 		}
 	}(p, &shouldFreePbuf)
 
