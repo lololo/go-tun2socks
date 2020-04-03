@@ -1,6 +1,7 @@
 package syncex
 
 import (
+	hackgid "github.com/eycorsican/go-tun2socks/component/gls"
 	"sync"
 )
 
@@ -19,7 +20,8 @@ type RecursiveMutex struct {
 // If rm is already owned by different goroutine, it waits
 // until the RecursiveMutex is available.
 func (rm *RecursiveMutex) Lock() {
-	id := getGID()
+	//id := getGID()
+	id := uint64(hackgid.GoID())
 	for {
 		rm.mu.Lock()
 		if rm.c == nil {
@@ -55,5 +57,13 @@ func (rm *RecursiveMutex) Unlock() {
 	select {
 	case rm.c <- struct{}{}:
 	default:
+	}
+}
+
+func init() {
+	id1 := getGID()
+	id2 := uint64(hackgid.GoID())
+	if id1 != id2 {
+		panic("hackgid and ordinary GID different")
 	}
 }
