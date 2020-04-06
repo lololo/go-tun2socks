@@ -1,15 +1,14 @@
 package fakedns
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
-	"sync"
 
 	"github.com/miekg/dns"
 
 	cdns "github.com/eycorsican/go-tun2socks/common/dns"
+	"github.com/eycorsican/go-tun2socks/common/dns/fakeip"
 	"github.com/eycorsican/go-tun2socks/common/log"
 	"github.com/eycorsican/go-tun2socks/component/pool"
 )
@@ -18,18 +17,8 @@ const (
 	FakeResponseTtl uint32 = 1 // in sec
 )
 
-type simpleFakeDns struct {
-	sync.Mutex
-
-	// TODO cleanup map
-	ip2domain map[uint32]string
-
-	// Cursor is an IPv4 address represent in uint32 type.
-	cursor    uint32
-	minCursor uint32
-	maxCursor uint32
-
-	fakeTtl uint32
+type fakeDNS struct {
+	fakePool *fakeip.Pool
 }
 
 func canHandleDnsQuery(data []byte) bool {
@@ -62,53 +51,22 @@ func canHandleDnsQuery(data []byte) bool {
 	return true
 }
 
-func uint322ip(n uint32) net.IP {
-	return net.IPv4(byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
-}
-
-func ip2uint32(ip net.IP) uint32 {
-	return binary.BigEndian.Uint32([]byte(ip)[net.IPv6len-net.IPv4len:])
-}
-
-func NewSimpleFakeDns(minIP, maxIP string) cdns.FakeDns {
-	parsedMinIP := net.ParseIP(minIP)
-	parsedMaxIP := net.ParseIP(maxIP)
-	if parsedMinIP == nil || parsedMaxIP == nil {
-		return nil
-	}
-	minFakeIPCursor := ip2uint32(parsedMinIP)
-	maxFakeIPCursor := ip2uint32(parsedMaxIP)
-	return &simpleFakeDns{
-		ip2domain: make(map[uint32]string, 64),
-		cursor:    minFakeIPCursor,
-		minCursor: minFakeIPCursor,
-		maxCursor: maxFakeIPCursor,
+func NewFakeDNS(ipnet *net.IPNet, size int) cdns.FakeDns {
+	fP, _ := fakeip.New(ipnet, size, nil)
+	return &fakeDNS{
+		fakePool: fP,
 	}
 }
 
-func (f *simpleFakeDns) allocateIP(domain string) net.IP {
-	f.Lock()
-	defer f.Unlock()
-	f.ip2domain[f.cursor] = domain
-	ip := uint322ip(f.cursor)
-	f.cursor += 1
-	if f.cursor > f.maxCursor {
-		f.cursor = f.minCursor
-	}
-	return ip
-}
-
-func (f *simpleFakeDns) QueryDomain(ip net.IP) string {
-	f.Lock()
-	defer f.Unlock()
-	if domain, found := f.ip2domain[ip2uint32(ip)]; found {
+func (f *fakeDNS) QueryDomain(ip net.IP) string {
+	domain, found := f.fakePool.LookBack(ip)
+	if found {
 		log.Debugf("fake dns returns domain %v for ip %v", domain, ip)
-		return domain
 	}
-	return ""
+	return domain
 }
 
-func (f *simpleFakeDns) GenerateFakeResponse(request []byte) ([]byte, error) {
+func (f *fakeDNS) GenerateFakeResponse(request []byte) ([]byte, error) {
 	if !canHandleDnsQuery(request) {
 		return nil, errors.New("cannot handle DNS request")
 	}
@@ -117,7 +75,7 @@ func (f *simpleFakeDns) GenerateFakeResponse(request []byte) ([]byte, error) {
 	qtype := req.Question[0].Qtype
 	fqdn := req.Question[0].Name
 	domain := fqdn[:len(fqdn)-1]
-	ip := f.allocateIP(domain)
+	ip := f.fakePool.Lookup(domain)
 	log.Debugf("fake dns allocated ip %v for domain %v", ip, domain)
 	resp := new(dns.Msg)
 	resp = resp.SetReply(req)
@@ -155,10 +113,6 @@ func (f *simpleFakeDns) GenerateFakeResponse(request []byte) ([]byte, error) {
 	return append([]byte(nil), dnsAnswer...), nil
 }
 
-func (f *simpleFakeDns) IsFakeIP(ip net.IP) bool {
-	c := ip2uint32(ip)
-	if c >= f.minCursor && c <= f.maxCursor {
-		return true
-	}
-	return false
+func (f *fakeDNS) IsFakeIP(ip net.IP) bool {
+	return f.fakePool.Exist(ip)
 }

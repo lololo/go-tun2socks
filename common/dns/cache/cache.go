@@ -3,11 +3,11 @@
 package cache
 
 import (
-	"sync"
 	"time"
 
 	"github.com/miekg/dns"
 
+	"github.com/eycorsican/go-tun2socks/common/cache"
 	cdns "github.com/eycorsican/go-tun2socks/common/dns"
 	"github.com/eycorsican/go-tun2socks/common/log"
 )
@@ -16,19 +16,16 @@ const minCleanupInterval = 5 * time.Minute
 
 type dnsCacheEntry struct {
 	msg []byte
-	exp time.Time
 }
 
 type simpleDnsCache struct {
-	mutex       sync.Mutex
-	storage     map[string]*dnsCacheEntry
-	lastCleanup time.Time
+	storage *cache.Cache
 }
 
 func NewSimpleDnsCache() cdns.DnsCache {
+	s := cache.New(minCleanupInterval)
 	return &simpleDnsCache{
-		storage:     make(map[string]*dnsCacheEntry),
-		lastCleanup: time.Now(),
+		storage: s,
 	}
 }
 
@@ -36,18 +33,6 @@ func packUint16(i uint16) []byte { return []byte{byte(i >> 8), byte(i)} }
 
 func cacheKey(q dns.Question) string {
 	return string(append([]byte(q.Name), packUint16(q.Qtype)...))
-}
-
-func (c *simpleDnsCache) cleanup() {
-	newStorage := make(map[string]*dnsCacheEntry)
-	log.Debugf("cleaning up dns %v cache entries", len(c.storage))
-	for key, entry := range c.storage {
-		if time.Now().Before(entry.exp) {
-			newStorage[key] = entry
-		}
-	}
-	c.storage = newStorage
-	log.Debugf("cleanup done, remaining %v entries", len(c.storage))
 }
 
 func (c *simpleDnsCache) Query(payload []byte) []byte {
@@ -60,15 +45,13 @@ func (c *simpleDnsCache) Query(payload []byte) []byte {
 		return nil
 	}
 
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
 	key := cacheKey(request.Question[0])
-	entry := c.storage[key]
-	if entry == nil {
+	entryInterface := c.storage.Get(key)
+	if entryInterface == nil {
 		return nil
 	}
-	if time.Now().After(entry.exp) {
-		delete(c.storage, key)
+	entry := entryInterface.(*dnsCacheEntry)
+	if entry == nil {
 		return nil
 	}
 
@@ -97,18 +80,12 @@ func (c *simpleDnsCache) Store(payload []byte) {
 		return
 	}
 
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
 	key := cacheKey(resp.Question[0])
-	c.storage[key] = &dnsCacheEntry{
+	ttl := resp.Answer[0].Header().Ttl
+	value := &dnsCacheEntry{
 		msg: payload,
-		exp: time.Now().Add(time.Duration(resp.Answer[0].Header().Ttl) * time.Second),
 	}
-	log.Debugf("stored dns answer with key: %v, ttl: %v sec", key, resp.Answer[0].Header().Ttl)
+	c.storage.Put(key, value, time.Duration(ttl)*time.Second)
 
-	now := time.Now()
-	if now.Sub(c.lastCleanup) > minCleanupInterval {
-		c.cleanup()
-		c.lastCleanup = now
-	}
+	log.Debugf("stored dns answer with key: %v, ttl: %v sec", key, ttl)
 }
