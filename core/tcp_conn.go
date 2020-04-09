@@ -138,12 +138,6 @@ func newTCPConn(pcb *C.struct_tcp_pcb, handler TCPConnHandler) (TCPConn, error) 
 			conn.Lock()
 			conn.state = tcpConnected
 			conn.Unlock()
-
-			lwipMutex.Lock()
-			if pcb.refused_data != nil {
-				C.tcp_process_refused_data(pcb)
-			}
-			lwipMutex.Unlock()
 		}
 	}()
 
@@ -492,6 +486,10 @@ func (conn *tcpConn) Abort() {
 	conn.Lock()
 	conn.state = tcpAborting
 	conn.Unlock()
+
+	lwipMutex.Lock()
+	conn.checkState()
+	lwipMutex.Unlock()
 }
 
 func (conn *tcpConn) Err(err error) {
