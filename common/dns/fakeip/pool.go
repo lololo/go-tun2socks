@@ -5,8 +5,8 @@ import (
 	"net"
 	"sync"
 
-	"github.com/eycorsican/go-tun2socks/common/cache"
 	trie "github.com/eycorsican/go-tun2socks/component/domain-trie"
+	lru "github.com/hashicorp/golang-lru"
 )
 
 // Pool is a implementation about fake ip generator without storage
@@ -17,7 +17,7 @@ type Pool struct {
 	offset  uint32
 	mux     sync.Mutex
 	host    *trie.Trie
-	cache   *cache.LruCache
+	cache   *lru.ARCCache
 }
 
 // Lookup return a fake ip with host
@@ -35,7 +35,7 @@ func (p *Pool) Lookup(host string) net.IP {
 	}
 
 	ip := p.get(host)
-	p.cache.Set(host, ip)
+	p.cache.Add(host, ip)
 	return ip
 }
 
@@ -54,8 +54,6 @@ func (p *Pool) LookBack(ip net.IP) (string, bool) {
 	if elm, exist := p.cache.Get(offset); exist {
 		host := elm.(string)
 
-		// ensure host --> ip on head of linked list
-		p.cache.Get(host)
 		return host, true
 	}
 
@@ -81,7 +79,7 @@ func (p *Pool) Exist(ip net.IP) bool {
 
 	n := ipToUint(ip.To4())
 	offset := n - p.min + 1
-	return p.cache.Exist(offset)
+	return p.cache.Contains(offset)
 }
 
 // Gateway return gateway ip
@@ -98,12 +96,12 @@ func (p *Pool) get(host string) net.IP {
 			break
 		}
 
-		if !p.cache.Exist(p.offset) {
+		if !p.cache.Contains(p.offset) {
 			break
 		}
 	}
 	ip := uintToIP(p.min + p.offset - 1)
-	p.cache.Set(p.offset, host)
+	p.cache.Add(p.offset, host)
 	return ip
 }
 
@@ -121,21 +119,25 @@ func uintToIP(v uint32) net.IP {
 
 // New return Pool instance
 func New(ipnet *net.IPNet, size int, host *trie.Trie) (*Pool, error) {
-	min := ipToUint(ipnet.IP) + 2
+	min := ipToUint(ipnet.IP) + 2 /* start from 2 aka 0 + 2 */
 
 	ones, bits := ipnet.Mask.Size()
-	total := 1<<uint(bits-ones) - 2
+	total := 1<<uint(bits-ones) - 3 /* network 0, gateway 1, broadcast 255 */
 
 	if total <= 0 {
 		return nil, errors.New("ipnet don't have valid ip")
 	}
 
 	max := min + uint32(total) - 1
+	c, err := lru.NewARC(size * 2)
+	if err != nil {
+		return nil, err
+	}
 	return &Pool{
 		min:     min,
 		max:     max,
 		gateway: min - 1,
 		host:    host,
-		cache:   cache.NewLRUCache(cache.WithSize(size * 2)),
+		cache:   c,
 	}, nil
 }
