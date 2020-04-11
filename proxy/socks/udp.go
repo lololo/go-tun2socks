@@ -19,55 +19,57 @@ import (
 // max IP packet size - min IP header size - min UDP header size - min SOCKS5 header size
 const maxUdpPayloadSize = 65535 - 20 - 8 - 7
 
+var (
+	natTable = &sync.Map{}
+)
+
+type natTableEntry struct {
+	udpConn    net.PacketConn
+	tcpConn    net.Conn
+	remoteAddr *net.UDPAddr // UDP relay server addresses
+}
+
 type udpHandler struct {
-	sync.Mutex
-
-	proxyHost   string
-	proxyPort   uint16
-	udpConns    map[core.UDPConn]net.PacketConn
-	tcpConns    map[core.UDPConn]net.Conn
-	remoteAddrs map[core.UDPConn]*net.UDPAddr // UDP relay server addresses
-	timeout     time.Duration
-
-	dnsCache dns.DnsCache
-	fakeDns  dns.FakeDns
+	proxyHost string
+	proxyPort uint16
+	timeout   time.Duration
+	dnsCache  dns.DnsCache
+	fakeDns   dns.FakeDns
 }
 
 func NewUDPHandler(proxyHost string, proxyPort uint16, timeout time.Duration, dnsCache dns.DnsCache, fakeDns dns.FakeDns) core.UDPConnHandler {
 	return &udpHandler{
-		proxyHost:   proxyHost,
-		proxyPort:   proxyPort,
-		udpConns:    make(map[core.UDPConn]net.PacketConn, 8),
-		tcpConns:    make(map[core.UDPConn]net.Conn, 8),
-		remoteAddrs: make(map[core.UDPConn]*net.UDPAddr, 8),
-		dnsCache:    dnsCache,
-		fakeDns:     fakeDns,
-		timeout:     timeout,
+		proxyHost: proxyHost,
+		proxyPort: proxyPort,
+		dnsCache:  dnsCache,
+		fakeDns:   fakeDns,
+		timeout:   timeout,
 	}
 }
 
 func (h *udpHandler) handleTCP(conn core.UDPConn, c net.Conn) {
 	buf := pool.NewBytes(pool.BufSize)
 	defer pool.FreeBytes(buf)
+	defer h.Close(conn)
 
 	for {
 		// Don't timeout
 		c.SetDeadline(time.Time{})
 		_, err := io.CopyBuffer(ioutil.Discard, c, buf)
 		if err == io.EOF {
-			log.Warnf("UDP associate to %v closed by remote", c.RemoteAddr())
-			h.Close(conn)
-			return
+			log.Infof("UDP associate to %v closed by remote", c.RemoteAddr())
 		} else if err != nil {
 			log.Warnf("UDP associate to %v closed unexpectedly by remote, err: %v", c.RemoteAddr(), err)
-			h.Close(conn)
-			return
 		}
+		return
 	}
 }
 
 func (h *udpHandler) fetchUDPInput(conn core.UDPConn, input net.PacketConn) {
 	buf := pool.NewBytes(maxUdpPayloadSize)
+	var err error
+	var bytesRead, bytesWritten int
+	var resolvedAddr *net.UDPAddr
 
 	defer func(conn core.UDPConn, buf []byte) {
 		h.Close(conn)
@@ -76,31 +78,44 @@ func (h *udpHandler) fetchUDPInput(conn core.UDPConn, input net.PacketConn) {
 
 	for {
 		input.SetDeadline(time.Now().Add(h.timeout))
-		n, _, err := input.ReadFrom(buf)
+		bytesRead, _, err = input.ReadFrom(buf)
 		if err != nil {
 			log.Warnf("read remote failed: %v", err)
 			return
 		}
-
+		log.Debugf("input.Readfrom %v", buf[:bytesRead])
 		addr := SplitAddr(buf[3:])
-		resolvedAddr, err := net.ResolveUDPAddr("udp", addr.String())
+		addrLen := len(addr)
+		addrStr := addr.String()
+		var payloadPos int = 3 + addrLen
+		resolvedAddr, err = net.ResolveUDPAddr("udp", addrStr)
 		if err != nil {
 			return
 		}
 		log.Infof("udp resolvedAddr: %v", resolvedAddr)
-		n, err = conn.WriteFrom(buf[int(3+len(addr)):n], resolvedAddr)
+		log.Debugf("payloadPos: %v", payloadPos)
+		log.Debugf("before conn.WriteFrom %v", buf[payloadPos:bytesRead])
+		bytesWritten, err = conn.WriteFrom(buf[payloadPos:bytesRead], resolvedAddr)
+		log.Debugf("after conn.WriteFrom %v", buf[payloadPos:payloadPos+bytesWritten])
 		if err != nil {
 			log.Warnf("write local failed: %v", err)
 			return
 		}
 
 		if h.dnsCache != nil {
-			_, port, err := net.SplitHostPort(addr.String())
+			var port string
+			var portnum uint64
+			_, port, err = net.SplitHostPort(addrStr)
 			if err != nil {
-				panic("impossible error")
+				log.Warnf("fetchUDPInput: SplitHostPort failed with %v", err)
+				return
 			}
-			if port == strconv.Itoa(dns.COMMON_DNS_PORT) {
-				h.dnsCache.Store(buf[int(3+len(addr)):n])
+			portnum, err = strconv.ParseUint(port, 10, 16)
+			if portnum == uint64(dns.COMMON_DNS_PORT) {
+				err = h.dnsCache.Store(buf[payloadPos:bytesRead])
+				if err != nil {
+					log.Warnf("fetchUDPInput: fail to store in DnsCache: %v", err)
+				}
 				return // DNS response
 			}
 		}
@@ -182,12 +197,12 @@ func (h *udpHandler) connectInternal(conn core.UDPConn, dest string) error {
 	if err != nil {
 		return err
 	}
-
-	h.Lock()
-	h.tcpConns[conn] = c
-	h.udpConns[conn] = pc
-	h.remoteAddrs[conn] = resolvedRemoteAddr
-	h.Unlock()
+	connKey := getConnKey(conn)
+	natTable.Store(connKey, &natTableEntry{
+		tcpConn:    c,
+		udpConn:    pc,
+		remoteAddr: resolvedRemoteAddr,
+	})
 
 	go h.fetchUDPInput(conn, pc)
 
@@ -199,81 +214,102 @@ func (h *udpHandler) connectInternal(conn core.UDPConn, dest string) error {
 }
 
 func (h *udpHandler) ReceiveTo(conn core.UDPConn, data []byte, addr *net.UDPAddr) error {
-	h.Lock()
-	pc, ok1 := h.udpConns[conn]
-	remoteAddr, ok2 := h.remoteAddrs[conn]
-	h.Unlock()
+	var err error
+	var pc net.PacketConn
+	var remoteAddr *net.UDPAddr
+	defer func(err *error) {
+		if *err != nil {
+			log.Infof("ReceiveTo: Call close in defered func")
+			h.Close(conn)
+		}
+	}(&err)
+	connKey := getConnKey(conn)
 
 	if addr.Port == dns.COMMON_DNS_PORT {
+		// fetch from dns cache first
+		if h.dnsCache != nil {
+			var answer []byte
+			answer, err = h.dnsCache.Query(data)
+			if err != nil {
+				return err
+			}
+			if answer != nil {
+				_, err = conn.WriteFrom(answer, addr)
+				if err != nil {
+					err = errors.New(fmt.Sprintf("write dns answer failed: %v", err))
+					return err
+				}
+				h.Close(conn)
+				return nil
+			}
+		}
+
+		// dns cache miss, do the query
 		if h.fakeDns != nil {
-			resp, err := h.fakeDns.GenerateFakeResponse(data)
+			var resp []byte
+			resp, err = h.fakeDns.GenerateFakeResponse(data)
 			if err != nil {
 				// FIXME This will block the lwip thread, need to optimize.
-				if err := h.connectInternal(conn, addr.String()); err != nil {
-					return fmt.Errorf("failed to connect to %v:%v", addr.Network(), addr.String())
+				if err = h.Connect(conn, addr); err != nil {
+					err = fmt.Errorf("failed to connect to %v:%v", addr.Network(), addr.String())
+					return err
 				}
-				h.Lock()
-				pc, ok1 = h.udpConns[conn]
-				remoteAddr, ok2 = h.remoteAddrs[conn]
-				h.Unlock()
+				if ent, ok := natTable.Load(connKey); ok {
+					pc = ent.(*natTableEntry).udpConn
+					remoteAddr = ent.(*natTableEntry).remoteAddr
+				}
 			} else {
 				_, err = conn.WriteFrom(resp, addr)
 				if err != nil {
-					return errors.New(fmt.Sprintf("write dns answer failed: %v", err))
+					err = errors.New(fmt.Sprintf("write dns answer failed: %v", err))
+					return err
 				}
 				h.Close(conn)
 				return nil
 			}
 		}
 
-		if h.dnsCache != nil {
-			if answer := h.dnsCache.Query(data); answer != nil {
-				_, err := conn.WriteFrom(answer, addr)
-				if err != nil {
-					return errors.New(fmt.Sprintf("write dns answer failed: %v", err))
-				}
-				h.Close(conn)
-				return nil
-			}
-		}
 	}
 
-	if ok1 && ok2 {
-		var targetHost string
-		if h.fakeDns != nil && h.fakeDns.IsFakeIP(addr.IP) {
-			targetHost = h.fakeDns.QueryDomain(addr.IP)
-		} else {
-			targetHost = addr.IP.String()
-		}
-		dest := net.JoinHostPort(targetHost, strconv.Itoa(addr.Port))
-
-		buf := append([]byte{0, 0, 0}, ParseAddr(dest)...)
-		buf = append(buf, data[:]...)
-		_, err := pc.WriteTo(buf, remoteAddr)
-		if err != nil {
-			h.Close(conn)
-			return errors.New(fmt.Sprintf("write remote failed: %v", err))
-		}
-		return nil
+	if ent, ok := natTable.Load(connKey); ok {
+		pc = ent.(*natTableEntry).udpConn
+		remoteAddr = ent.(*natTableEntry).remoteAddr
 	} else {
-		h.Close(conn)
-		return errors.New(fmt.Sprintf("proxy connection %v->%v does not exists", conn.LocalAddr(), addr))
+		err = errors.New(fmt.Sprintf("proxy connection %v->%v does not exists", conn.LocalAddr(), addr))
+		return err
 	}
+
+	var targetHost string
+	if h.fakeDns != nil && h.fakeDns.IsFakeIP(addr.IP) {
+		targetHost = h.fakeDns.QueryDomain(addr.IP)
+	} else {
+		targetHost = addr.IP.String()
+	}
+	dest := net.JoinHostPort(targetHost, strconv.Itoa(addr.Port))
+
+	buf := append([]byte{0, 0, 0}, ParseAddr(dest)...)
+	buf = append(buf, data[:]...)
+	_, err = pc.WriteTo(buf, remoteAddr)
+	if err != nil {
+		err = errors.New(fmt.Sprintf("write remote failed: %v", err))
+		return err
+	}
+	return err
+
 }
 
 func (h *udpHandler) Close(conn core.UDPConn) {
 	conn.Close()
-
-	h.Lock()
-	defer h.Unlock()
-
-	if c, ok := h.tcpConns[conn]; ok {
-		c.Close()
-		delete(h.tcpConns, conn)
+	connKey := getConnKey(conn)
+	// Load from remoteConnMap
+	if ent, ok := natTable.Load(connKey); ok {
+		ent.(*natTableEntry).udpConn.Close()
+		ent.(*natTableEntry).tcpConn.Close()
+		ent.(*natTableEntry).remoteAddr = nil
 	}
-	if pc, ok := h.udpConns[conn]; ok {
-		pc.Close()
-		delete(h.udpConns, conn)
-	}
-	delete(h.remoteAddrs, conn)
+	natTable.Delete(connKey)
+}
+
+func getConnKey(conn core.UDPConn) string {
+	return conn.LocalAddr().String()
 }

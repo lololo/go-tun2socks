@@ -3,6 +3,8 @@
 package cache
 
 import (
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/miekg/dns"
@@ -35,24 +37,26 @@ func cacheKey(q dns.Question) string {
 	return string(append([]byte(q.Name), packUint16(q.Qtype)...))
 }
 
-func (c *simpleDnsCache) Query(payload []byte) []byte {
+func (c *simpleDnsCache) Query(payload []byte) ([]byte, error) {
 	request := new(dns.Msg)
 	e := request.Unpack(payload)
 	if e != nil {
-		return nil
+		return nil, e
 	}
 	if len(request.Question) == 0 {
-		return nil
+		return nil, errors.New("request.Question is empty")
 	}
 
 	key := cacheKey(request.Question[0])
 	entryInterface := c.storage.Get(key)
 	if entryInterface == nil {
-		return nil
+		log.Debugf("no entry found in DnsCache, key: %v", key)
+		// not an error
+		return nil, nil
 	}
 	entry := entryInterface.(*dnsCacheEntry)
 	if entry == nil {
-		return nil
+		return nil, errors.New("nil pointer in DnsCache entry")
 	}
 
 	resp := new(dns.Msg)
@@ -61,23 +65,23 @@ func (c *simpleDnsCache) Query(payload []byte) []byte {
 	var buf [1024]byte
 	dnsAnswer, err := resp.PackBuffer(buf[:])
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	log.Debugf("got dns answer from cache with key: %v", key)
-	return append([]byte(nil), dnsAnswer...)
+	return append([]byte(nil), dnsAnswer...), nil
 }
 
-func (c *simpleDnsCache) Store(payload []byte) {
+func (c *simpleDnsCache) Store(payload []byte) error {
 	resp := new(dns.Msg)
 	e := resp.Unpack(payload)
 	if e != nil {
-		return
+		return e
 	}
 	if resp.Rcode != dns.RcodeSuccess {
-		return
+		return errors.New(fmt.Sprintf("resp.Rcode not RcodeSuccess: DNS resp is: %v", resp.String()))
 	}
 	if len(resp.Question) == 0 || len(resp.Answer) == 0 {
-		return
+		return errors.New("resp.Question or resp.Answer is empty")
 	}
 
 	key := cacheKey(resp.Question[0])
@@ -88,4 +92,5 @@ func (c *simpleDnsCache) Store(payload []byte) {
 	c.storage.Put(key, value, time.Duration(ttl)*time.Second)
 
 	log.Debugf("stored dns answer with key: %v, ttl: %v sec", key, ttl)
+	return nil
 }
