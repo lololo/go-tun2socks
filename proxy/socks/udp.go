@@ -68,7 +68,8 @@ func (h *udpHandler) handleTCP(conn core.UDPConn, c net.Conn) {
 func (h *udpHandler) fetchUDPInput(conn core.UDPConn, input net.PacketConn) {
 	buf := pool.NewBytes(maxUdpPayloadSize)
 	var err error
-	var bytesRead, bytesWritten int
+	var bytesRead int
+	//var bytesWritten int
 	var resolvedAddr *net.UDPAddr
 
 	defer func(conn core.UDPConn, buf []byte) {
@@ -83,7 +84,7 @@ func (h *udpHandler) fetchUDPInput(conn core.UDPConn, input net.PacketConn) {
 			log.Warnf("read remote failed: %v", err)
 			return
 		}
-		log.Debugf("input.Readfrom %v", buf[:bytesRead])
+		//log.Debugf("input.Readfrom %v", buf[:bytesRead])
 		addr := SplitAddr(buf[3:])
 		addrLen := len(addr)
 		addrStr := addr.String()
@@ -92,11 +93,11 @@ func (h *udpHandler) fetchUDPInput(conn core.UDPConn, input net.PacketConn) {
 		if err != nil {
 			return
 		}
-		log.Infof("udp resolvedAddr: %v", resolvedAddr)
-		log.Debugf("payloadPos: %v", payloadPos)
-		log.Debugf("before conn.WriteFrom %v", buf[payloadPos:bytesRead])
-		bytesWritten, err = conn.WriteFrom(buf[payloadPos:bytesRead], resolvedAddr)
-		log.Debugf("after conn.WriteFrom %v", buf[payloadPos:payloadPos+bytesWritten])
+		//log.Debugf("udp resolvedAddr: %v", resolvedAddr)
+		//log.Debugf("payloadPos: %v", payloadPos)
+		//log.Debugf("before conn.WriteFrom %v", buf[payloadPos:bytesRead])
+		_ /*bytesWritten*/, err = conn.WriteFrom(buf[payloadPos:bytesRead], resolvedAddr)
+		//log.Debugf("after conn.WriteFrom %v", buf[payloadPos:payloadPos+bytesWritten])
 		if err != nil {
 			log.Warnf("write local failed: %v", err)
 			return
