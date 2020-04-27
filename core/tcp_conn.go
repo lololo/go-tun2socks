@@ -129,8 +129,6 @@ func newTCPConn(pcb *C.struct_tcp_pcb, handler TCPConnHandler) (TCPConn, error) 
 	conn.state = tcpConnecting
 	conn.Unlock()
 	go func() {
-		lwipMutex.Lock()
-		defer lwipMutex.Unlock()
 		err := handler.Handle(TCPConn(conn), conn.remoteAddr)
 		if err != nil {
 			conn.Abort()
