@@ -26,9 +26,13 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+#include <stdint.h>
 
 #ifndef LWIP_CUSTOM_LWIPOPTS_H
 #define LWIP_CUSTOM_LWIPOPTS_H
+
+#define XSTR(x) STR(x)
+#define STR(x) #x
 
 // enable tun2socks logic
 #define TUN2SOCKS 1
@@ -61,27 +65,102 @@
 #define LWIP_IPV6_MLD 0
 #define LWIP_IPV6_AUTOCONFIG 1
 
+/* 32bit and 64bit CPU */
+#if INTPTR_MAX == INT32_MAX
+#warning THIS_IS_32BIT_ENVIRONMENT
+#define CPU_WORD_LEN     32
+#elif INTPTR_MAX == INT64_MAX
+#warning THIS_IS_64BIT_ENVIRONMENT
+#define CPU_WORD_LEN     64
+#else
+#error "Environment not 32 or 64-bit."
+#endif
+
+//#pragma message "The value of CPU_WORD_LEN: " XSTR(CPU_WORD_LEN)
+
+#define CPU_BYTE_LEN     8
+#define _KB              (1024)
+#define _MB             (1024 * 1024)
+
+#define MEM_ALIGNMENT                  (CPU_WORD_LEN / CPU_BYTE_LEN)
+//#pragma message "The value of MEM_ALIGNMENT: " XSTR(MEM_ALIGNMENT)
+
+//#define MEM_SIZE                       (512 * _KB)
+#define MEM_SIZE                       (4 * _MB)
+#define MEMP_NUM_PBUF                   512
+#define PBUF_POOL_SIZE                  512
+#define PBUF_POOL_BUFSIZE               1600
+
+#if MEM_SIZE >= (32 * _MB)
+#define MEMP_NUM_REASSDATA             150
+#elif MEM_SIZE >= (1 * _MB)
+#define MEMP_NUM_REASSDATA             100
+#elif MEM_SIZE >= (512 * _KB)
+#define MEMP_NUM_REASSDATA              80
+#elif MEM_SIZE >= (256 * _KB)
+#define MEMP_NUM_REASSDATA              40
+#elif MEM_SIZE >= (128 * _KB)
+#define MEMP_NUM_REASSDATA              20
+#else
+#define MEMP_NUM_REASSDATA              5
+#endif
+
 #define MEMP_NUM_TCP_PCB_LISTEN 5
 #define MEMP_NUM_TCP_PCB 1024
 #define MEMP_NUM_UDP_PCB 512
 
-#define PBUF_POOL_SIZE 128
+#define LWIP_TCP_TIMESTAMPS             1
+#define IP_REASS_MAX_PBUFS              (MEMP_NUM_PBUF / 2)
 
-#define TCP_MSS 1460
-#define TCP_SND_BUF                     (44 * TCP_MSS)
 
-#define MEMP_NUM_TCP_SEG                TCP_SND_QUEUELEN
+#define TCP_MSS                         1460
+
+#define TCP_CALCULATE_EFF_SEND_MSS      1
+
+#if MEM_SIZE >= (32 * _MB)
+#define TCP_WND                         ((64 * _KB) - 1)
+#define TCP_SND_BUF                     (128 * _KB)
+#elif MEM_SIZE >= (16 * _MB)
+#define TCP_WND                         ((64 * _KB) - 1)
+#define TCP_SND_BUF                     (64  * _KB)
+#elif MEM_SIZE >= (4 * _MB)
+#define TCP_WND                         (32  * _KB)
+#define TCP_SND_BUF                     (32  * _KB)
+#elif MEM_SIZE >= (1 * _MB)
+#define TCP_WND                         (16  * _KB)
+#define TCP_SND_BUF                     (32  * _KB)
+#elif MEM_SIZE >= (512 * _KB)
+#define TCP_WND                         ( 8  * _KB)
+#define TCP_SND_BUF                     (16  * _KB)
+#elif MEM_SIZE >= (128 * _KB)
+#define TCP_WND                         ( 8  * _KB)
+#define TCP_SND_BUF                     ( 8  * _KB)
+#elif MEM_SIZE >= (64 * _KB)  /* MEM_SIZE < 128 _KB  SMALL TCP_MSS XXX */
+#undef  TCP_MSS
+#define TCP_MSS                         536
+#define TCP_WND                         ( 4  * TCP_MSS)
+#define TCP_SND_BUF                     ( 4  * TCP_MSS)
+#else
+#undef  TCP_MSS
+#define TCP_MSS                         256
+#define TCP_WND                         ( 4  * TCP_MSS)
+#define TCP_SND_BUF                     ( 4  * TCP_MSS)
+#endif
+
+#if TCP_WND < (4  * TCP_MSS)
+#define TCP_WND                         ( 4  * TCP_MSS)
+#endif
+
+#define TCP_SND_QUEUELEN                ((4 * (TCP_SND_BUF) + (TCP_MSS - 1))/(TCP_MSS))
+#define MEMP_NUM_TCP_SEG                (8 * TCP_SND_QUEUELEN)
+
+#define LWIP_TCP_KEEPALIVE              1
 
 #define LWIP_TCP_SACK_OUT 1
-#define LWIP_TCP_KEEPALIVE 1
-
-#define LWIP_WND_SCALE                  1
-#define TCP_RCV_SCALE                   2
+#define LWIP_TCP_MAX_SACK_NUM           8
 
 #define MEM_LIBC_MALLOC 0
 #define MEMP_MEM_MALLOC 0
-#define MEM_ALIGNMENT 4
-#define MEM_SIZE 128 * 1024
 
 #define SYS_LIGHTWEIGHT_PROT 0
 #define LWIP_DONT_PROVIDE_BYTEORDER_FUNCTIONS
