@@ -304,9 +304,14 @@ func (h *udpHandler) Close(conn core.UDPConn) {
 	connKey := getConnKey(conn)
 	// Load from remoteConnMap
 	if ent, ok := natTable.Load(connKey); ok {
-		ent.(*natTableEntry).udpConn.Close()
-		ent.(*natTableEntry).tcpConn.Close()
-		ent.(*natTableEntry).remoteAddr = nil
+		entry := ent.(*natTableEntry)
+		entry.udpConn.Close()
+		if tcp, ok := entry.tcpConn.(*net.TCPConn); ok {
+			tcp.CloseRead()
+			tcp.CloseWrite()
+		}
+		entry.tcpConn.Close()
+		entry.remoteAddr = nil
 	}
 	natTable.Delete(connKey)
 }
