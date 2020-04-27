@@ -84,7 +84,7 @@ func peekNextProto(ipv ipver, p []byte) (proto, error) {
 	}
 }
 
-func Input(pkt []byte) (int, error) {
+func input(pkt []byte) (int, error) {
 	lwipMutex.Lock()
 	defer lwipMutex.Unlock()
 	pktLen := len(pkt)
