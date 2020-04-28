@@ -154,6 +154,8 @@
 #define TCP_SND_QUEUELEN                ((4 * (TCP_SND_BUF) + (TCP_MSS - 1))/(TCP_MSS))
 #define MEMP_NUM_TCP_SEG                (8 * TCP_SND_QUEUELEN)
 
+#define LWIP_WND_SCALE                  1
+#define TCP_RCV_SCALE                   0
 #define LWIP_TCP_KEEPALIVE              1
 
 #define LWIP_TCP_SACK_OUT 1
