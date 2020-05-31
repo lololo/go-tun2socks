@@ -84,14 +84,20 @@ func (h *udpHandler) fetchUDPInput(conn core.UDPConn, input net.PacketConn) {
 			log.Warnf("read remote failed: %v", err)
 			return
 		}
+		if bytesRead < 3 {
+			continue
+		}
 		//log.Debugf("input.Readfrom %v", buf[:bytesRead])
-		addr := SplitAddr(buf[3:])
+		addr := SplitAddr(buf[3:bytesRead])
+		if addr == nil {
+			continue
+		}
 		addrLen := len(addr)
 		addrStr := addr.String()
 		var payloadPos int = 3 + addrLen
 		resolvedAddr, err = net.ResolveUDPAddr("udp", addrStr)
 		if err != nil {
-			return
+			continue
 		}
 		//log.Debugf("udp resolvedAddr: %v", resolvedAddr)
 		//log.Debugf("payloadPos: %v", payloadPos)
