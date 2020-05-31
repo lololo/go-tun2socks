@@ -5,7 +5,7 @@ import (
 	"net"
 	"sync"
 
-	trie "github.com/eycorsican/go-tun2socks/component/domain-trie"
+	"github.com/eycorsican/go-tun2socks/component/trie"
 	lru "github.com/hashicorp/golang-lru"
 )
 
@@ -16,7 +16,7 @@ type Pool struct {
 	gateway uint32
 	offset  uint32
 	mux     sync.Mutex
-	host    *trie.Trie
+	host    *trie.DomainTrie
 	cache   *lru.ARCCache
 }
 
@@ -118,7 +118,7 @@ func uintToIP(v uint32) net.IP {
 }
 
 // New return Pool instance
-func New(ipnet *net.IPNet, size int, host *trie.Trie) (*Pool, error) {
+func New(ipnet *net.IPNet, size int, host *trie.DomainTrie) (*Pool, error) {
 	min := ipToUint(ipnet.IP) + 2 /* start from 2 aka 0 + 2 */
 
 	ones, bits := ipnet.Mask.Size()
