@@ -9,8 +9,6 @@
 
 #include <lwip/opt.h>
 
-#include <android/log.h>
-
 #define LWIP_TIMEVAL_PRIVATE 0
 
 /* Compiler hints for packing structures */
@@ -20,17 +18,17 @@
 #define PACK_STRUCT_END
 
 #define MY_ANDROID_LOG_TAG  "Trojan-TUN-lwIP"
-#define MY_ANDROID_PRINT(...)  __android_log_print(ANDROID_LOG_ERROR, MY_ANDROID_LOG_TAG, ## __VA_ARGS__)
+//#define MY_ANDROID_PRINT(...)  __android_log_print(ANDROID_LOG_ERROR, MY_ANDROID_LOG_TAG, ## __VA_ARGS__)
 
 /* Plaform specific diagnostic output */
 #define LWIP_PLATFORM_DIAG(...)   do { \
-  MY_ANDROID_PRINT("%s/%s(%d): ", __FILE__, __func__, __LINE__); \
-  MY_ANDROID_PRINT __VA_ARGS__; \
-  MY_ANDROID_PRINT("\n"); \
+  //MY_ANDROID_PRINT("%s/%s(%d): ", __FILE__, __func__, __LINE__); \
+  //MY_ANDROID_PRINT __VA_ARGS__; \
+  //MY_ANDROID_PRINT("\n"); \
 } while(0)
 
 #define LWIP_PLATFORM_ASSERT(...) do { \
-  MY_ANDROID_PRINT("[Assert]%s/%s(%d): %s\n", __FILE__, __func__, __LINE__, __VA_ARGS__); \
+  //MY_ANDROID_PRINT("[Assert]%s/%s(%d): %s\n", __FILE__, __func__, __LINE__, __VA_ARGS__); \
   abort(); \
 } while(0)
 
